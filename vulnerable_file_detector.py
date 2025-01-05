@@ -61,30 +61,40 @@ def analyze_code(code_snippet, tokenizer, model):
 vulnerable_files_folder = "vulnerable_files"
 
 # Load model and tokenizer
-tokenizer, model = load_model_and_tokenizer()
-
-# Initialize the map to store results
-insecure_code_map = {}
+vulnerable_tokenizer, vulnerable_model = load_model_and_tokenizer()
 
 # Iterate through each file in the folder
-for filename in os.listdir(vulnerable_files_folder):
-    file_path = os.path.join(vulnerable_files_folder, filename)
+def analyze_directory(folder, tokenizer, model):
+    # Dictionary to map file paths to analysis results
+    output_map = {}
 
-    # Check if the current item is a file
-    if os.path.isfile(file_path):
-        print(f"Analyzing file: {filename}")
+    # Recursively walk through all directories and files
+    for root, _, files in os.walk(folder):
+        for filename in files:
+            file_path = os.path.join(root, filename)
 
-        # Read the file content
-        with open(file_path, "r") as file:
-            code_snippet = file.read()
+            # Check if the current item is a file
+            if os.path.isfile(file_path):
+                print(f"Analyzing file: {file_path}")
 
-        # Analyze the code snippet
-        result = analyze_code(code_snippet, tokenizer, model)
+                # Read the file content
+                try:
+                    with open(file_path, "r") as file:
+                        code_snippet = file.read()
+                except Exception as e:
+                    print(f"Error reading file {file_path}: {e}")
+                    continue
 
-        # Map the result to YES or NO
-        insecure_code_map[file_path] = "YES" if "Insecure code detected" in result else "NO"
+                # Analyze the code snippet
+                result = analyze_code(code_snippet, tokenizer, model)
+
+                # Map the result to YES or NO
+                output_map[file_path] = "YES" if "Insecure code detected" in result else "NO"
+
+    return output_map
 
 # Print the map of results
 print("\nAnalysis Results:")
+insecure_code_map = analyze_directory(vulnerable_files_folder, vulnerable_tokenizer, vulnerable_model)
 for path, status in insecure_code_map.items():
     print(f"\t{path}: {status}")

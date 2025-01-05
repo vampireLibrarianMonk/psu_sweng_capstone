@@ -2,3 +2,7 @@
 ipex-llm-capstone.ipynb
 .idea
 *.gguf
+logs
+mitigated_files
+*__pycache__
+*.pyc
