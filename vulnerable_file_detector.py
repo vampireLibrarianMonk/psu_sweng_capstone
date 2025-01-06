@@ -1,7 +1,14 @@
+import json
 import os
+from bandit.core.manager import BanditManager
+from bandit.core.config import BanditConfig
 import torch
 import numpy as np
+from bandit.formatters.text import get_metrics
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from utilities import setup_logger
+
+BANDIT_OUTPUT = "bandit"
 
 """
 The model `mrm8488/codebert-base-finetuned-detect-insecure-code` is a fine-tuned version of CodeBERT, a pre-trained model designed for
@@ -57,13 +64,6 @@ def analyze_code(code_snippet, tokenizer, model):
     else:
         return "No obvious vulnerabilities detected. However, further manual review is recommended."
 
-# Define the path to the folder containing the files
-vulnerable_files_folder = "vulnerable_files"
-
-# Load model and tokenizer
-vulnerable_tokenizer, vulnerable_model = load_model_and_tokenizer()
-
-# Iterate through each file in the folder
 def analyze_directory(folder, tokenizer, model):
     # Dictionary to map file paths to analysis results
     output_map = {}
@@ -73,16 +73,20 @@ def analyze_directory(folder, tokenizer, model):
         for filename in files:
             file_path = os.path.join(root, filename)
 
-            # Check if the current item is a file
-            if os.path.isfile(file_path):
-                print(f"Analyzing file: {file_path}")
+            # Get and separate file name into its base name and extension
+            base_name = os.path.basename(file_path)
+            name, ext = os.path.splitext(base_name)
+
+            # Check if the current item is a Python file
+            if os.path.isfile(file_path) and file_path.endswith('.py'):
+                logger.info(f"Analyzing file: {file_path}")
 
                 # Read the file content
                 try:
                     with open(file_path, "r") as file:
                         code_snippet = file.read()
                 except Exception as e:
-                    print(f"Error reading file {file_path}: {e}")
+                    logger.error(f"Error reading file {file_path}: {e}")
                     continue
 
                 # Analyze the code snippet
@@ -91,10 +95,78 @@ def analyze_directory(folder, tokenizer, model):
                 # Map the result to YES or NO
                 output_map[file_path] = "YES" if "Insecure code detected" in result else "NO"
 
+                # Run Bandit analysis
+                try:
+                    # Initialize Bandit configuration and manager
+                    config = BanditConfig()
+                    manager = BanditManager(config, 'file', 'json')
+                    manager.discover_files([file_path], True)
+                    manager.run_tests()
+                    issues = manager.get_issue_list()
+
+                    # Generate a timestamped filename for the Bandit report
+                    pre_folder = root.replace("/", "_")
+                    bandit_output_file = os.path.join(bandit_output_dir, f"bandit_{pre_folder}_{name}.json")
+
+                    # Write Bandit report to JSON file
+                    with open(bandit_output_file, 'w') as report_file:
+                        report_data = {
+                            'results': [issue.as_dict() for issue in issues],
+                            'metrics': get_metrics(manager),
+                        }
+                        json.dump(report_data, report_file, indent=4)
+
+                    logger.info(f"Bandit report saved to: {bandit_output_file}")
+                except Exception as e:
+                    logger.error(f"Bandit analysis failed for {file_path}: {e}")
+
     return output_map
 
+def analyze_file_with_bandit(file_path):
+    # Get and separate file name into its base name and extension
+    base_name = os.path.basename(file_path)
+    name, ext = os.path.splitext(base_name)
+
+    # Run Bandit analysis
+    try:
+        # Initialize Bandit configuration and manager
+        config = BanditConfig()
+        manager = BanditManager(config, 'file', 'json')
+        manager.discover_files([file_path], True)
+        manager.run_tests()
+        issues = manager.get_issue_list()
+
+        # Generate a timestamped filename for the Bandit report
+        bandit_output_file = os.path.join(bandit_output_dir, f"bandit_single_file{name}.json")
+
+        # Write Bandit report to JSON file
+        with open(bandit_output_file, 'w') as report_file:
+            report_data = {
+                'results': [issue.as_dict() for issue in issues],
+                'metrics': get_metrics(manager),
+            }
+            json.dump(report_data, report_file, indent=4)
+
+        logger.info(f"Bandit report saved to: {bandit_output_file}")
+        return bandit_output_file
+    except Exception as e:
+        logger.error(f"Bandit analysis failed for {file_path}: {e}")
+
+
+bandit_output_dir = "bandit_reports"
+os.makedirs(bandit_output_dir, exist_ok=True)
+
+# Define the path to the folder containing the files
+vulnerable_files_folder = "mitigated_files"
+
+# Initialize the logger
+logger = setup_logger(f"vulnerability_detector")
+
+# Load model and tokenizer
+vulnerable_tokenizer, vulnerable_model = load_model_and_tokenizer()
+
 # Print the map of results
-print("\nAnalysis Results:")
+logger.info("\nAnalysis Results:")
 insecure_code_map = analyze_directory(vulnerable_files_folder, vulnerable_tokenizer, vulnerable_model)
 for path, status in insecure_code_map.items():
-    print(f"\t{path}: {status}")
+    logger.info(f"\t{path}: {status}")

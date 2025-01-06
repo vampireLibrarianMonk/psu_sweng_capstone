@@ -49,10 +49,7 @@ GRANT ALL PRIVILEGES ON DATABASE sonarqube TO sonar;
 \q
 ```
 
-8. Download SonarQube:
-```bash
-wget https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-<version>.zip
-```
+8. Download [SonarQube](https://binaries.sonarsource.com/?prefix=Distribution/sonarqube/):
 
 9. Replace <version> with the latest version from SonarQube Downloads.
 
@@ -83,10 +80,7 @@ sudo su sonar
 Access SonarQube at http://localhost:9000 in your browser. Default credentials are admin / admin.
 ```
 
-14. Download SonarScanner:
-```bash
-wget https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-<version>-linux.zip
-```
+14. Download [SonarScanner](https://binaries.sonarsource.com/?prefix=Distribution/sonar-scanner-cli/):
 
 15. Extract and move:
 ```bash
@@ -96,12 +90,11 @@ sudo mv sonar-scanner-<version>-linux /opt/sonar-scanner
 
 16. Update the PATH:
 ```bash
-Copy code
 echo "export PATH=/opt/sonar-scanner/bin:\$PATH" >> ~/.bashrc
 source ~/.bashrc
 ```
 
-17. Create a sonar-project.properties file in your project directory:
+17. Create a `sonar-project.properties` file in your project directory:
 ```properties
 sonar.projectKey=your-project-key
 sonar.projectName=Your Project Name
@@ -112,15 +105,17 @@ sonar.login=your-sonarqube-token
 ```
 
 18. Generate a token from SonarQube under Administration > Security > Tokens.
+
+19. Run Sonar Scanner
 ```bash
 sonar-scanner
 ```
 
-19. View Results
+20. View Results
 Log in to the SonarQube UI (http://localhost:9000) to view the scan results.
 Export results in desired formats using plugins like SonarQube PDF Plugin or via APIs.
 
-20. Automate Reports (Optional)
+21. Automate Reports (Optional)
 You can use SonarQube's API to extract results in JSON format:
 ```bash
 curl -u your-sonarqube-token: "http://localhost:9000/api/issues/search?componentKeys=your-project-key"
