@@ -122,37 +122,6 @@ def analyze_directory(folder, tokenizer, model):
 
     return output_map
 
-def analyze_file_with_bandit(file_path):
-    # Get and separate file name into its base name and extension
-    base_name = os.path.basename(file_path)
-    name, ext = os.path.splitext(base_name)
-
-    # Run Bandit analysis
-    try:
-        # Initialize Bandit configuration and manager
-        config = BanditConfig()
-        manager = BanditManager(config, 'file', 'json')
-        manager.discover_files([file_path], True)
-        manager.run_tests()
-        issues = manager.get_issue_list()
-
-        # Generate a timestamped filename for the Bandit report
-        bandit_output_file = os.path.join(bandit_output_dir, f"bandit_single_file{name}.json")
-
-        # Write Bandit report to JSON file
-        with open(bandit_output_file, 'w') as report_file:
-            report_data = {
-                'results': [issue.as_dict() for issue in issues],
-                'metrics': get_metrics(manager),
-            }
-            json.dump(report_data, report_file, indent=4)
-
-        logger.info(f"Bandit report saved to: {bandit_output_file}")
-        return bandit_output_file
-    except Exception as e:
-        logger.error(f"Bandit analysis failed for {file_path}: {e}")
-
-
 bandit_output_dir = "bandit_reports"
 os.makedirs(bandit_output_dir, exist_ok=True)
 
