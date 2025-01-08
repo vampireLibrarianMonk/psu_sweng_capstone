@@ -1,7 +1,7 @@
 import unittest
 import pickle
 import json
-from mitigated_files.vulnerable_1_mitigated import load_user_data as mitigated_load
+from mitigated_files.vulnerable_1_mitigated_iteration_1 import load_user_data as mitigated_load
 from vulnerable_files.python.vulnerable_1 import load_user_data as vulnerable_load
 
 class TestLoadUserData(unittest.TestCase):
