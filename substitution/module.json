@@ -1,4 +1,5 @@
 {
     "os.system": "Remove the os.system module and implement a function that validates user input against a predefined set of allowed commands (e.g., 'ls', 'mkdir', 'rm', 'cp') and executes them using the 'sh' module.",
-    "subprocess": "Remove the subprocess module and implement a function that validates user input against a predefined set of allowed commands (e.g., 'ls', 'mkdir', 'rm', 'cp') and executes them using the 'sh' module."
+    "subprocess": "Remove the subprocess module and implement a function that validates user input against a predefined set of allowed commands (e.g., 'ls', 'mkdir', 'rm', 'cp') and executes them using the 'sh' module.",
+    "pickle": "Replace the pickle module with the json module for serialization and deserialization. JSON handles basic data types securely and doesn't execute arbitrary code during deserialization, reducing the risk of code injection attacks."
 }

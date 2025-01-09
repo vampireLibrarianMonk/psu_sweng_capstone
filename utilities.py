@@ -220,6 +220,18 @@ def extract_module_names(text):
     # Return matches if found; otherwise, return a generic placeholder
     return matches
 
+def extract_libraries(mitigated_code):
+    # Regular expression to match import and from statements
+    pattern = r'^\s*(?:import\s+([\w\.]+)|from\s+([\w\.]+)\s+import\s+)'
+
+    # Find all matches in the code string
+    matches = re.findall(pattern, mitigated_code, re.MULTILINE)
+
+    # Extract and combine the matched groups
+    libraries = [lib for match in matches for lib in match if lib]
+
+    return libraries
+
 # Example usage
 if __name__ == "__main__":
     # Initialize the logger
