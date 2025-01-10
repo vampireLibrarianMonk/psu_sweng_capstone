@@ -1,11 +1,13 @@
 import json
 import os
-from bandit.core.manager import BanditManager
-from bandit.core.config import BanditConfig
-import torch
+
 import numpy as np
+import torch
+from bandit.core.config import BanditConfig
+from bandit.core.manager import BanditManager
 from bandit.formatters.text import get_metrics
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
 from utilities import setup_logger
 
 BANDIT_OUTPUT = "bandit"
@@ -23,6 +25,7 @@ it can be integrated with generative models or static analysis tools to provide 
 
 MODEL_NAME = "mrm8488/codebert-base-finetuned-detect-insecure-code"
 
+
 def load_model_and_tokenizer():
     """
     Load the pre-trained model and tokenizer for detecting insecure code.
@@ -34,6 +37,7 @@ def load_model_and_tokenizer():
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
     return tokenizer, model
+
 
 def analyze_code(code_snippet, tokenizer, model):
     """
@@ -63,6 +67,7 @@ def analyze_code(code_snippet, tokenizer, model):
         return "Insecure code detected. Please review and apply necessary security measures."
     else:
         return "No obvious vulnerabilities detected. However, further manual review is recommended."
+
 
 def analyze_directory(folder, tokenizer, model):
     # Dictionary to map file paths to analysis results
@@ -121,6 +126,7 @@ def analyze_directory(folder, tokenizer, model):
                     logger.error(f"Bandit analysis failed for {file_path}: {e}")
 
     return output_map
+
 
 bandit_output_dir = "bandit_reports"
 os.makedirs(bandit_output_dir, exist_ok=True)
