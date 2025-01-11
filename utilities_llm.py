@@ -109,19 +109,6 @@ def get_optimal_gpu_layers(input_model_path, input_total_layers, safety_margin_g
     return max(0, min(optimal_layers, input_total_layers))
 
 
-def get_rocm_smi_methods():
-    # Initialize ROCm SMI
-    rocml.smi_initialize()
-
-    # List all attributes and methods in the rocml module
-    attributes = dir(rocml)
-    for attribute in attributes:
-        print(attribute)
-
-    # Shutdown ROCm SMI
-    rocml.smi_shutdown()
-
-
 def analyze_file_with_bandit(file_path, logger):
     # Get and separate file name into its base name and extension
     base_name = os.path.basename(file_path)
@@ -515,9 +502,7 @@ def save_code_to_file(code, path, logger):
         file_io.write(code)
     logger.info(f"Code saved to file: {path}")
 
-
-# Example usage
-if __name__ == "__main__":
+def test_llm():
     # Initialize the logger
     logger_main = setup_logger(f"utilities_test")
 
@@ -547,3 +532,8 @@ if __name__ == "__main__":
 
     # Print the generated text
     logger_main.info(output["choices"][0]["text"])
+
+# Example usage
+if __name__ == "__main__":
+    # Leave blank for testing methods within utilities
+    test_llm()
