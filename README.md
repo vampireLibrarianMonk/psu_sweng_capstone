@@ -39,15 +39,15 @@ In the realm of software development, ensuring code security is paramount. With 
 Static code analysis is a method of evaluating source code without executing it, aiming to identify potential vulnerabilities and ensure code quality. Tools such as Bandit, Dodgy and Semgrep are instrumental in this process, each offering unique capabilities that, when combined, provide a comprehensive security assessment.
 
 - `Bandit`:
-Bandit is a security linter designed specifically for Python. It examines Abstract Syntax Trees (ASTs) to detect common security issues, such as the use of insecure functions or modules. By scanning Python codebases, Bandit identifies vulnerabilities like hardcoded passwords, weak cryptographic practices and improper exception handling. Its integration into continuous integration pipelines facilitates automated security checks, promoting the development of secure Python applications.[URL](https://bandit.readthedocs.io/en/latest/?utm_source=chatgpt.com)
+Bandit is a security linter designed specifically for Python. It examines Abstract Syntax Trees (ASTs) to detect common security issues, such as the use of insecure functions or modules. By scanning Python codebases, Bandit identifies vulnerabilities like hardcoded passwords, weak cryptographic practices and improper exception handling. Its integration into continuous integration pipelines facilitates automated security checks, promoting the development of secure Python applications.[Github Bandit](https://github.com/PyCQA/bandit)
 
 - `Dodgy`
-Dodgy is a straightforward tool that searches codebases for "dodgy" values using simple regular expressions. It focuses on detecting potentially dangerous functions, hardcoded secrets and weak cryptographic practices. By identifying these risky elements, Dodgy helps developers eliminate insecure coding patterns that could lead to vulnerabilities.[URL](https://analysis-tools.dev/tool/bandit?utm_source=chatgpt.com)
+Dodgy is a straightforward tool that searches codebases for "dodgy" values using simple regular expressions. It focuses on detecting potentially dangerous functions, hardcoded secrets and weak cryptographic practices. By identifying these risky elements, Dodgy helps developers eliminate insecure coding patterns that could lead to vulnerabilities.[Github Dodgy](https://github.com/prospector-dev/dodgy)
 
 - `Semgrep`
-Semgrep is a versatile static analysis tool that supports multiple programming languages. It allows developers to write custom rules to detect code patterns, enabling the identification of complex security vulnerabilities and enforcement of coding standards. Semgrep's pattern-matching capabilities make it effective in finding issues that may be overlooked by other tools and its support for various languages makes it suitable for diverse codebases.[URL](https://github.com/semgrep/semgrep?utm_source=chatgpt.com)
-  - `p/default`: This is Semgrep's standard ruleset, encompassing a broad range of general-purpose rules designed to identify common security issues and code quality concerns across various programming languages.[Application Security Guide](https://appsec.guide/docs/static-analysis/semgrep/in-your-organization/?utm_source=chatgpt.com)
-  - `p/owasp-top-ten`: This ruleset focuses on detecting vulnerabilities outlined in the OWASP Top Ten, which represents the most critical security risks to web applications. It includes rules to identify issues such as SQL injection, cross-site scripting (XSS) and insecure deserialization.[Semgrep OWASP Top Ten](https://semgrep.dev/solutions/owasp-top-ten/?utm_source=chatgpt.com)
+Semgrep is a versatile static analysis tool that supports multiple programming languages. It allows developers to write custom rules to detect code patterns, enabling the identification of complex security vulnerabilities and enforcement of coding standards. Semgrep's pattern-matching capabilities make it effective in finding issues that may be overlooked by other tools and its support for various languages makes it suitable for diverse codebases.[URL](https://github.com/semgrep/semgrep)
+  - `p/default`: This is Semgrep's standard ruleset, encompassing a broad range of general-purpose rules designed to identify common security issues and code quality concerns across various programming languages.[Application Security Guide](https://appsec.guide/docs/static-analysis/semgrep/in-your-organization)
+  - `p/owasp-top-ten`: This ruleset focuses on detecting vulnerabilities outlined in the OWASP Top Ten, which represents the most critical security risks to web applications. It includes rules to identify issues such as SQL injection, cross-site scripting (XSS) and insecure deserialization.[Semgrep OWASP Top Ten](https://semgrep.dev/solutions/owasp-top-ten)
   - `p/python`: Tailored specifically for Python codebases, this ruleset includes rules that detect security vulnerabilities, code quality issues and adherence to Pythonic conventions. It helps in identifying problems like the use of insecure functions, improper exception handling and other Python-specific concerns.[Semgrep Python Rules](https://github.com/semgrep/semgrep-rules/tree/develop/python)
   - `p/django`: When the codebase uses the Django framework, this ruleset is included to detect security issues and enforce best practices specific to Django applications. It identifies problems such as improper use of Django's ORM, security misconfigurations and other framework-specific concerns.[Semgrep Python Django Rules](https://github.com/semgrep/semgrep-rules/tree/develop/python/django)
   - `p/flask`: Similarly, for projects utilizing the Flask framework, this ruleset is added to detect vulnerabilities and enforce best practices pertinent to Flask applications. It focuses on issues like unsafe route definitions, improper input handling and other Flask-specific security concerns.[Semgrep Python Flask](https://github.com/semgrep/semgrep-rules/tree/develop/python/flask) 
@@ -64,7 +64,7 @@ While each tool independently enhances code security, their combined use offers 
 
 Incorporating Bandit, Dodgy and Semgrep into the development workflow enables developers to identify and address security concerns early, ensuring the delivery of secure and robust software applications.
 
-### 2-2 Machine Learning Models for Code Analysis
+### 2.2 Machine Learning Models for Code Analysis
 
 Recent advancements in machine learning have led to models capable of understanding and analyzing code semantics:
 
@@ -158,7 +158,7 @@ mamba activate pytorch-rocm-capstone
 
 To assess mitigation capability, employ datasets with known vulnerabilities, such as the ones in section [5.2](#52-security-vulnerability-detection). Implement a script that mitigates identified vulnerabilities and dynamically generates test cases to manually validate the functionality of the original code. This approach ensures that the mitigated code maintains the intended behavior. If preserving the original functionality is not feasible due to security concerns, the script should provide comments explaining why the initial implementation was insecure and suggest alternative solutions. These alternatives may produce different outputs but will enhance the overall security posture of the codebase.
 
-Monitoring the performance metrics of your Python scripts is essential for optimizing efficiency and resource management, especially when performing Large Language Model (LLM) inference using the llama_cpp library on AMD GPUs with the ROCm platform. Here's how you can measure CPU usage, RAM consumption and GPU memory utilization:
+Monitoring the performance metrics of your Python scripts is essential for optimizing efficiency and resource management, especially when performing Large Language Model (LLM) inference using the llama_cpp library on AMD GPUs with the ROCm platform. Here's how you can measure CPU usage, RAM consumption and GPU memory utilization, of which [here](https://github.com/vampireLibrarianMonk/gpu-grafana-dashboard) is the repository to use to monitor these metrics for the AMD GPU Machine:
 
    - CPU Usage: Utilize the psutil library to monitor CPU utilization. The psutil.cpu_percent(interval=1) function returns the CPU usage percentage over a specified interval. By calling this function at regular intervals, you can track CPU usage throughout your script's execution.
 
@@ -166,98 +166,18 @@ Monitoring the performance metrics of your Python scripts is essential for optim
 
    - GPU Memory Utilization: For tracking GPU memory usage on AMD GPUs with ROCm, the pyrsmi library can be employed. This Python package provides bindings to the ROCm System Management Interface (SMI), allowing you to query various GPU metrics directly within your Python scripts. By integrating pyrsmi into your monitoring workflow, you can effectively track GPU resource consumption.
 
-#### 5.1.1 Example Usage of `pyrsmi`
+#### 5.1.1 Integrating LLM Inference with `llama_cpp` for specifically testing gpu metrics.
 
-This script initializes the ROCm SMI library, retrieves the number of GPU devices, and iterates over each device to obtain and display memory usage statistics. Finally, it shuts down the SMI library to release resources.
-
-```python
-from pyrsmi import rocml
-
-# Initialize the ROCm SMI library
-rocml.smi_initialize()
-
-# Get the number of GPU devices
-device_count = rocml.smi_get_device_count()
-print(f"Number of GPU devices: {device_count}")
-
-# Iterate over each device and retrieve memory usage
-for device_id in range(device_count):
-    memory_used = rocml.smi_get_device_memory_used(device_id)
-    memory_total = rocml.smi_get_device_memory_total(device_id)
-    memory_usage_percentage = (memory_used / memory_total) * 100
-    print(f"Device {device_id}:")
-    print(f"  Memory Used: {memory_used / (1024 ** 2):.2f} MB")
-    print(f"  Total Memory: {memory_total / (1024 ** 2):.2f} MB")
-    print(f"  Memory Usage: {memory_usage_percentage:.2f}%")
-
-# Shutdown the ROCm SMI library
-rocml.smi_shutdown()
-```
-
-#### 5.1.2 Integrating LLM Inference with `llama_cpp`
-
-This script demonstrates how to log CPU, RAM, and GPU memory usage before and after performing LLM inference using the llama_cpp library, providing insights into resource consumption during the process.
-
-```python
-import time
-import torch
-from llama_cpp import Llama
-from pyrsmi import rocml
-import psutil
-
-# Initialize ROCm SMI
-rocml.smi_initialize()
-
-# Function to log resource usage
-def log_resource_usage():
-    # CPU usage
-    cpu_usage = psutil.cpu_percent(interval=1)
-    memory_info = psutil.virtual_memory()
-    print(f"CPU Usage: {cpu_usage}%")
-    print(f"RAM Usage: {memory_info.percent}%")
-
-    # GPU usage
-    device_count = rocml.smi_get_device_count()
-    for device_id in range(device_count):
-        memory_used = rocml.smi_get_device_memory_used(device_id)
-        memory_total = rocml.smi_get_device_memory_total(device_id)
-        memory_usage_percentage = (memory_used / memory_total) * 100
-        print(f"GPU {device_id} Memory Usage: {memory_usage_percentage:.2f}%")
-
-# Load your LLM model
-llm = Llama(model_path='path_to_your_model')
-llm.eval()
-
-# Input data for inference
-input_data = "Your input prompt here"
-
-# Log initial resource usage
-print("Initial Resource Usage:")
-log_resource_usage()
-
-# Measure inference time
-start_time = time.perf_counter()
-output = llm(input_data)
-end_time = time.perf_counter()
-inference_time = end_time - start_time
-print(f"Inference Time: {inference_time:.4f} seconds")
-
-# Log resource usage after inference
-print("Resource Usage After Inference:")
-log_resource_usage()
-
-# Shutdown ROCm SMI
-rocml.smi_shutdown()
-```
+This [script](test_llm_w_metrics.py) demonstrates how to log CPU, RAM and GPU memory usage before and after performing LLM inference using the llama_cpp library, providing insights into resource consumption during the process.
 
 ### 5.2 Security Vulnerability Detection
-Dataset Utilization: Employ the following datasets containing Python files labeled with respective vulnerabilities:
+Dataset Utilization: Review and piecemeal glean the following datasets containing Python files labeled with respective vulnerabilities:
 
-   - VulnerabilityDetection: A collection of Python code snippets labeled for various vulnerabilities. https://github.com/LauraWartschinski/VulnerabilityDetection
-   - Python_Vulnerable_Code: A small collection of vulnerable Python code snippets categorized by vulnerability type. https://github.com/Vulnerable-Code-Samples/Python_Vulnerable_Code
-   - AEGIS: A transformer-based Python vulnerability detection model accompanied by a curated dataset from real-world code and synthetic examples. https://github.com/Abdechakour-Mc/AEGIS
-   - Function-level-Vulnerability-Dataset: Labeled vulnerable functions for statistical analysis and neural network training. https://github.com/Seahymn2019/Function-level-Vulnerability-Dataset
-   - Comparison with Existing Tools: Evaluate your LLM scripts against established static analysis tools such as Bandit, Dodgy and Semgrep. Identify areas where your approach excels or complements these tools, providing a comprehensive analysis of strengths and weaknesses.
+   - [Intentionally Vulnerable Python Application](https://github.com/mukxl/Intentionally-Vulnerable-Python-Application):
+   - [Vulnerability Detection](https://github.com/LauraWartschinski/VulnerabilityDetection): A collection of Python code snippets labeled for various vulnerabilities. 
+   - [Python_Vulnerable_Code](https://github.com/Vulnerable-Code-Samples/Python_Vulnerable_Code): A small collection of vulnerable Python code snippets categorized by vulnerability type. 
+   - [AEGIS](https://github.com/Abdechakour-Mc/AEGIS): A transformer-based Python vulnerability detection model accompanied by a curated dataset from real-world code and synthetic examples.
+   - [Function-level-Vulnerability-Dataset](https://github.com/Seahymn2019/Function-level-Vulnerability-Dataset): Labeled vulnerable functions for statistical analysis and neural network training.
 
 ### 5.3 Case Studies
 Real-World Application: Apply your detection and mitigation scripts to real-world Python projects. Document specific instances where vulnerabilities were successfully identified and mitigated, demonstrating practical effectiveness.

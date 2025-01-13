@@ -28,6 +28,7 @@ dependencies:
   - wheel=0.45.1
   - pip:
       - accelerate==1.2.1
+      - autoimport==1.6.1
       - bandit[baseline]==1.8.0
       - dodgy==0.2.1
       - filelock==3.16.1

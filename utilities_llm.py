@@ -15,13 +15,13 @@ from gguf_parser import GGUFParser
 from llama_cpp import Llama
 
 
-bandit_output_dir = "bandit_reports"
+bandit_output_dir = "reports/bandit"
 os.makedirs(bandit_output_dir, exist_ok=True)
 
-dodgy_output_dir = "dodgy_reports"
+dodgy_output_dir = "reports/dodgy"
 os.makedirs(dodgy_output_dir, exist_ok=True)
 
-semgrep_output_dir = "semgrep_reports"
+semgrep_output_dir = "reports/semgrep"
 os.makedirs(semgrep_output_dir, exist_ok=True)
 
 def setup_logger(log_suffix="log"):

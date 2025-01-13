@@ -1,7 +1,6 @@
 import re
 import subprocess
 import time
-
 import pyrsmi.rocml as rocml
 
 
@@ -83,10 +82,10 @@ def monitor_gpu_metrics(gpu_index=0, interval=1, iterations=10):
 
 def get_gpu_info():
     """
-    Retrieve GPU information, including the board name, VBIOS version, and power metrics.
+    Retrieve GPU information, including the board name, VBIOS version and power metrics.
 
     Returns:
-    - dict: A dictionary containing the board name, VBIOS version, power usage, and power cap, or error messages if not found.
+    - dict: A dictionary containing the board name, VBIOS version, power usage and power cap, or error messages if not found.
     """
     result = {}
 
@@ -227,7 +226,6 @@ def get_gpu_info():
         print(error_message)
 
     return result
-
 
 # Example usage
 if __name__ == "__main__":
