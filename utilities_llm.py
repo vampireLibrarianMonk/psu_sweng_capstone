@@ -74,129 +74,69 @@ def setup_logger(log_suffix="log"):
 def parse_python_script(file_path):
     """
     Parses a Python script to extract and categorize its components into variables,
-    methods, and the main script block. It also associates relevant import statements
-    with each component.
+    methods, and the main script block. It associates instances like 'app' with the
+    main script if they're used within the `if __name__ == '__main__':` block and
+    ensures they're not included in methods that do not reference them.
 
     Args:
         file_path (str): The path to the Python script file to be parsed.
 
     Returns:
-        dict: A dictionary with keys 'variables', 'methods', and 'main_script'.
-              - 'variables' maps to a string containing all variable assignments.
+        dict: A dictionary with keys 'global_variables', 'methods', and 'main_script'.
+              - 'global_variables' maps to a string containing all variable assignments not used in methods.
               - 'methods' maps to a dictionary where keys are function names and values are their code.
               - 'main_script' maps to a string containing the code within the `if __name__ == '__main__':` block.
     """
-    # Initialize the mapping with empty sections
     parsed_script = {
-        'variables': '',
+        'global_variables': '',
         'methods': {},
         'main_script': ''
     }
 
-    # Read the script from the file
     with open(file_path, 'r') as file:
         script = file.read()
 
-    # Parse the script into an Abstract Syntax Tree (AST)
     tree = ast.parse(script)
 
     def get_source_segment(node):
-        """
-        Retrieves the source code segment corresponding to a given AST node.
-
-        Args:
-            node (ast.AST): The AST node for which to retrieve the source code.
-
-        Returns:
-            str: The source code segment as a string.
-        """
         return ast.get_source_segment(script, node) or ''
 
-    def extract_imports():
-        """
-        Extracts all import statements from the AST and organizes them into a dictionary.
+    # Step 1: Identify global variables and imports
+    global_vars = {}
+    import_statements = []
+    instance_assignments = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    global_vars[target.id] = get_source_segment(node)
+                    # Track instances created by calling a class (e.g., app = Flask(__name__))
+                    if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name):
+                        instance_assignments[target.id] = node.value.func.id
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            import_statements.append((node, get_source_segment(node)))
 
-        Returns:
-            defaultdict: A dictionary where keys are module names and values are lists of imported symbols.
-                         A value of [None] indicates a full module import.
-        """
-        imports = defaultdict(list)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    imports[alias.name].append(None)  # None indicates full module import
-            elif isinstance(node, ast.ImportFrom):
-                module_name = node.module
-                for alias in node.names:
-                    imports[module_name].append(alias.name)
-        return imports
-
-    def import_used_in_node(import_name, target_node):
-        """
-        Determines if a specific import is utilized within a given AST node.
-
-        Args:
-            import_name (str): The name of the imported module or symbol.
-            target_node (ast.AST): The AST node to inspect.
-
-        Returns:
-            bool: True if the import is used within the target node; False otherwise.
-        """
-        class ImportUsageVisitor(ast.NodeVisitor):
+    # Step 2: Determine usage in functions and main script
+    def is_name_used_in_node(name, target_node):
+        class NameUsageVisitor(ast.NodeVisitor):
             def __init__(self):
                 self.used = False
 
             def visit_Name(self, node):
-                if node.id == import_name:
+                if node.id == name:
                     self.used = True
                 self.generic_visit(node)
 
-            def visit_Attribute(self, node):
-                if isinstance(node.value, ast.Name) and node.value.id == import_name:
-                    self.used = True
-                self.generic_visit(node)
-
-        visitor = ImportUsageVisitor()
+        visitor = NameUsageVisitor()
         visitor.visit(target_node)
         return visitor.used
 
-    # Extract all imports from the script
-    all_imports = extract_imports()
+    used_global_vars = set()
+    used_imports = set()
 
-    def add_relevant_imports(code_segment, node):
-        """
-        Identifies and prepends relevant import statements to a code segment based on the imports
-        used within the given AST node.
-
-        Args:
-            code_segment (str): The code segment to which imports should be added.
-            node (ast.AST): The AST node representing the code segment.
-
-        Returns:
-            str: The code segment with relevant import statements prepended.
-        """
-        relevant_imports = []
-        for module, symbols in all_imports.items():
-            if None in symbols:  # Entire module is imported
-                if import_used_in_node(module, node):
-                    relevant_imports.append(f"import {module}")
-            else:  # Specific symbols are imported
-                used_symbols = [sym for sym in symbols if import_used_in_node(sym, node)]
-                if used_symbols:
-                    relevant_imports.append(f"from {module} import {', '.join(used_symbols)}")
-        if relevant_imports:
-            code_segment = '\n'.join(relevant_imports) + '\n' + code_segment
-        return code_segment
-
-    # Iterate over the top-level nodes in the AST
+    # Step 3: Include relevant globals and imports in function code
     for node in tree.body:
-        if isinstance(node, ast.Assign):
-            # Handle variable assignments
-            variable_code = get_source_segment(node)
-            variable_code = add_relevant_imports(variable_code, node)
-            parsed_script['variables'] += variable_code + '\n'
-        elif isinstance(node, ast.FunctionDef):
-            # Handle function definitions
+        if isinstance(node, ast.FunctionDef):
             method_name = node.name
             method_code = get_source_segment(node)
             # Include decorators and preceding comments
@@ -208,20 +148,39 @@ def parse_python_script(file_path):
                     start_lineno -= 1
                 else:
                     break
-            method_code = add_relevant_imports(method_code, node)
+            # Add relevant global variables
+            for var_name, var_code in global_vars.items():
+                if is_name_used_in_node(var_name, node):
+                    method_code = var_code + '\n' + method_code
+                    used_global_vars.add(var_name)
+            # Add relevant import statements
+            for imp_node, imp_code in import_statements:
+                if isinstance(imp_node, ast.Import):
+                    for alias in imp_node.names:
+                        if is_name_used_in_node(alias.name, node):
+                            method_code = imp_code + '\n' + method_code
+                            used_imports.add(imp_code)
+                elif isinstance(imp_node, ast.ImportFrom):
+                    module = imp_node.module
+                    for alias in imp_node.names:
+                        if is_name_used_in_node(alias.name, node):
+                            method_code = imp_code + '\n' + method_code
+                            used_imports.add(imp_code)
             parsed_script['methods'][method_name] = method_code
         elif isinstance(node, ast.If) and '__main__' in get_source_segment(node):
-            # Handle the main script block
-            code_text = get_source_segment(node) + '\n'
-            parsed_script['main_script'] += code_text
+            main_script_code = get_source_segment(node)
+            # Add instances used in the main script
+            for instance_name, class_name in instance_assignments.items():
+                if is_name_used_in_node(instance_name, node):
+                    main_script_code = global_vars[instance_name] + '\n' + main_script_code
+                    used_global_vars.add(instance_name)
+            parsed_script['main_script'] = main_script_code
 
-    # Strip trailing newlines from each section
-    for key in parsed_script:
-        if isinstance(parsed_script[key], str):
-            parsed_script[key] = parsed_script[key].strip()
-        elif isinstance(parsed_script[key], dict):
-            for sub_key in parsed_script[key]:
-                parsed_script[key][sub_key] = parsed_script[key][sub_key].strip()
+    # Step 4: Collect unused global variables and imports
+    unused_globals = [code for name, code in global_vars.items() if name not in used_global_vars]
+    unused_imports = [code for _, code in import_statements if code not in used_imports]
+
+    parsed_script['global_variables'] = '\n'.join(unused_imports + unused_globals).strip()
 
     return parsed_script
 
@@ -633,6 +592,7 @@ def process_streamed_output(response, logger, print_stream=False):
 
     Args:
         response (iterator): An iterator yielding chunks of response content.
+        logger: Logger object
         print_stream: Boolean for printing what is in the stream as it goes.
 
     Returns:
@@ -642,9 +602,10 @@ def process_streamed_output(response, logger, print_stream=False):
     for chunk in response:
         content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
         if print_stream:
-            print(content, end="", flush=True)  # Print in real-time
+            print(content, end="", flush=True)  # Print in real-time, do not using logging!
         complete_output += content
-    logger.info("\n")  # Ensure a new line after the streamed output
+    if print_stream:
+        print("\n")  # Ensure a new line after the streamed output, do not using logging!
     return complete_output
 
 
@@ -715,7 +676,7 @@ def run_mitigation_loop(
 
     logger.info(f"Running an iteration series of {bandit_allowance}.")
     while iteration < bandit_allowance:
-        logger.info(f"Running iteration {iteration}.")
+        logger.info(f"{'-' * 35} Running iteration {iteration} {'-' * 35}")
 
         # Read the specified file
         try:
@@ -732,7 +693,7 @@ def run_mitigation_loop(
             exit(1)
 
         # Define the system and user prompts
-        bandit_system_prompt = (
+        system_prompt = (
             "You are an AI programming assistant specializing in secure coding practices."
         )
 
@@ -772,7 +733,7 @@ def run_mitigation_loop(
         semgrep_issues_section = (f"Semgrep has identified the following issues"
                                   f" in the provided Python code:\n{semgrep_issues}\n\n") if semgrep_issues else ""
 
-        bandit_code_prompt = (
+        code_prompt = (
             f"Ensure that all recommendations adhere to best security practices.\n"
             f"{bandit_issues_section}"
             f"{dodgy_issues_section}"
@@ -785,12 +746,12 @@ def run_mitigation_loop(
         )
 
         messages = [
-            {"role": "system", "content": bandit_system_prompt},
-            {"role": "user", "content": bandit_code_prompt}
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": code_prompt}
         ]
 
         # Adjust temperature to control randomness; increase to make output more diverse
-        temperature = min(max_temperature, initial_temperature + temperature_increment * iteration)
+        temperature = round(min(max_temperature, initial_temperature + temperature_increment * iteration), 2)
 
         # Generate code with adjusted parameters
         """
@@ -814,7 +775,7 @@ def run_mitigation_loop(
             responses.
         """
         logger.info(f"Using an adjusted temperature of {temperature}.")
-        bandit_adjusted_code_response = llm.create_chat_completion(
+        adjusted_code_response = llm.create_chat_completion(
             messages=messages,  # system and user prompt
             temperature=temperature,
             top_p=1,
@@ -824,7 +785,7 @@ def run_mitigation_loop(
         )
 
         # Process the streamed response
-        adjusted_code_block = process_streamed_output(bandit_adjusted_code_response, logger)
+        adjusted_code_block = process_streamed_output(adjusted_code_response, logger)
         logger.info("Secure code generation completed.")
 
         # Extract the code block from the secure code suggestion
