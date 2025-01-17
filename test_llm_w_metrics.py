@@ -42,7 +42,7 @@ if __name__ == "__main__":
 
     # Initialize the Llama model with appropriate settings
     llm = Llama(
-        model_path='models/llama-3.2-3b-instruct-q8_0.gguf',
+        model_path=model_path,
         seed=42,  # Fixed seed for reproducibility
         n_ctx=4096,  # Set the desired context size here
         use_mmap=True,  # Memory mapping for efficiency
@@ -85,7 +85,7 @@ if __name__ == "__main__":
     )
 
     # Process the streamed response
-    output = process_streamed_output(chat_request, logger)
+    output = process_streamed_output(chat_request)
     end_time = time.perf_counter()
     inference_time = end_time - start_time
     print(f"Inference Time: {inference_time:.4f} seconds")

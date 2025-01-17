@@ -10,6 +10,7 @@ from datetime import datetime
 
 import autoimport
 import pyrsmi.rocml as rocml
+import stdlib_list
 from bandit.core.config import BanditConfig
 from bandit.core.manager import BanditManager
 from bandit.formatters.text import get_metrics
@@ -184,6 +185,140 @@ def parse_python_script(file_path):
 
     return parsed_script
 
+
+def organize_imports_and_globals(file_path):
+    """
+    Reads a Python file, organizes and deduplicates its import statements and global variables,
+    detects instance creation assignments, and moves them to the top of the file.
+
+    :param file_path: Path to the Python file to be processed.
+    """
+
+    def process_import_nodes(import_nodes):
+        """
+        Processes AST import nodes to deduplicate and organize them.
+
+        :param import_nodes: List of import-related AST nodes.
+        :return: String of organized import statements.
+        """
+        import_dict = {}
+        for node in import_nodes:
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    import_dict.setdefault(None, set()).add(alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ''
+                if module not in import_dict:
+                    import_dict[module] = set()
+                import_dict[module].update(alias.name for alias in node.names)
+
+        # Deduplicate and sort imports
+        import_strings = []
+
+        # Handle plain `import ...` statements (key=None)
+        if None in import_dict:
+            for name in sorted(import_dict.pop(None)):
+                import_strings.append(f"import {name}")
+
+        # Handle `from ... import ...` statements
+        for module, names in sorted(import_dict.items()):
+            sorted_names = ", ".join(sorted(names))
+            import_strings.append(f"from {module} import {sorted_names}")
+
+        # Group imports into standard library, third-party, and local
+        std_lib_imports, third_party_imports, local_imports = group_imports(import_strings)
+
+        # Combine organized imports
+        organized_imports = "\n".join(
+            std_lib_imports + [""] +
+            third_party_imports + [""] +
+            local_imports
+        )
+        return organized_imports.strip()  # Remove extra spaces
+
+    def group_imports(import_strings):
+        """
+        Groups imports into standard library, third-party, and local imports.
+
+        :param import_strings: List of import statements as strings.
+        :return: Tuple of grouped imports (std_lib, third_party, local).
+        """
+        std_lib_modules = set(stdlib_list.stdlib_list("3.10"))  # Adjust for Python 3.10
+
+        std_lib = []
+        third_party = []
+        local = []
+
+        for imp in import_strings:
+            if any(imp.startswith(f"import {mod}") or imp.startswith(f"from {mod}") for mod in std_lib_modules):
+                std_lib.append(imp)
+            elif imp.startswith("from .") or imp.startswith("import ."):
+                local.append(imp)
+            else:
+                third_party.append(imp)
+
+        return sorted(std_lib), sorted(third_party), sorted(local)
+
+    with open(file_path, 'r') as file:
+        source_code = file.read()
+
+    # Parse the source code into an AST
+    tree = ast.parse(source_code)
+    import_statements = []
+    global_variables = {}
+    instance_creations = set()  # Use a set to prevent duplication
+    other_code = []
+
+    # Extract import statements, global variables, instance creations, and other code
+    for node in tree.body:
+        node_source = ast.get_source_segment(source_code, node)
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            import_statements.append(node)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    if target.id.isupper():
+                        # Handle global constants
+                        global_variables[target.id] = node
+                    elif isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name):
+                        # General pattern: variable = ClassName(argument)
+                        class_name = node.value.func.id
+                        if len(node.value.args) == 1 and isinstance(node.value.args[0], ast.Name):
+                            argument_name = node.value.args[0].id
+                            # Store the instance creation details as a tuple
+                            instance_creation = (
+                                target.id,
+                                class_name,
+                                argument_name,
+                                node_source
+                            )
+                            instance_creations.add(instance_creation)
+                        else:
+                            other_code.append(node)
+                    else:
+                        other_code.append(node)
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+            # Preserve top-level docstrings or other expressions
+            other_code.append(node)
+        else:
+            other_code.append(node)
+
+    # Deduplicate and organize imports
+    organized_imports = process_import_nodes(import_statements)
+
+    # Generate global variables section
+    global_variables_code = "\n".join(ast.unparse(node) for node in global_variables.values())
+
+    # Generate instance creations section
+    instance_creations_code = "\n".join(ic[3] for ic in instance_creations)
+
+    # Generate remaining code
+    other_code_source = ast.unparse(ast.Module(body=other_code, type_ignores=[]))
+
+    # Combine sections into the final source code
+    new_source_code = f"{organized_imports}\n\n{global_variables_code}\n\n{instance_creations_code}\n\n{other_code_source}"
+
+    return new_source_code
 
 def get_optimal_gpu_layers(input_model_path, input_total_layers, safety_margin_gb=4.0):
     """
@@ -586,7 +721,7 @@ def extract_secure_implementation_explanation_statement(text):
     return match.group(1).strip().replace("\n", "") if match else None
 
 
-def process_streamed_output(response, logger, print_stream=False):
+def process_streamed_output(response, print_stream=False):
     """
     Processes the streamed output chunk by chunk.
 
@@ -785,7 +920,7 @@ def run_mitigation_loop(
         )
 
         # Process the streamed response
-        adjusted_code_block = process_streamed_output(adjusted_code_response, logger)
+        adjusted_code_block = process_streamed_output(adjusted_code_response)
         logger.info("Secure code generation completed.")
 
         # Extract the code block from the secure code suggestion
@@ -831,6 +966,10 @@ def save_code_to_file(code, path, logger):
         file_io.write(code)
     logger.info(f"Code saved to file: {path}")
 
+def write_to_file(file_path, content):
+    """Helper function to write content to a file."""
+    with open(file_path, 'w') as file:
+        file.write(content)
 
 def test_llm():
     # Initialize the logger
