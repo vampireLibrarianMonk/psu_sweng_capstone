@@ -5,7 +5,6 @@ import logging
 import os
 import re
 import subprocess
-from collections import defaultdict
 from datetime import datetime
 
 import autoimport
@@ -320,6 +319,7 @@ def organize_imports_and_globals(file_path):
 
     return new_source_code
 
+
 def get_optimal_gpu_layers(input_model_path, input_total_layers, safety_margin_gb=4.0):
     """
     Determines the optimal number of transformer layers to offload to the GPU
@@ -538,7 +538,8 @@ def analyze_file_with_semgrep(file_path, extracted_libraries, logger):
                     'owasp': finding.get('extra', {}).get('metadata', {}).get('owasp', []),
                     'cwe': finding.get('extra', {}).get('metadata', {}).get('cwe', [])
                 }
-                all_findings.append(standardized_finding)
+                if standardized_finding not in all_findings:  # Avoid duplicate entries
+                    all_findings.append(standardized_finding)
 
         # Write standardized report to JSON file
         with open(semgrep_output_file, 'w') as report_file:
@@ -793,6 +794,7 @@ def run_mitigation_loop(
     # Semgrep
     # Get libraries so the rulesets below (django and flask) can use them if they exist
     extracted_libraries = extract_libraries(original_code)
+
     # A lightweight static analysis tool that scans code for security vulnerabilities and enforces coding standards.
     # It offers customizable rules and supports taint analysis to track untrusted data through your codebase.
     semgrep_scan_json_path = analyze_file_with_semgrep(mitigated_file_path, extracted_libraries, logger)
@@ -841,10 +843,10 @@ def run_mitigation_loop(
         word_count = int(initial_word_count * 1.2 + word_count_increment * iteration)
 
         # Extract the libraries from the mitigated code
-        extracted_libraries = extract_libraries(original_code)
+        extracted_libraries = extract_libraries(mitigated_code)
 
         # Filter the module.json dictionary
-        suggestion_map = {key: value for key, value in module_associations.items() if key in extracted_libraries}
+        suggestion_map = {key: value for key, value in module_associations.items() if key in mitigated_code}
 
         # Construct the substitution part of the code prompt
         if suggestion_map:
@@ -873,6 +875,7 @@ def run_mitigation_loop(
             f"{bandit_issues_section}"
             f"{dodgy_issues_section}"
             f"{semgrep_issues_section}"
+            f"Always retrieve credentials securely using os.environ.get() instead of hardcoding them.\n\n"
             f"{substitution_code_instruction}\n"
             f"Ensure the code does not exceed {word_count} words.\n"
             f"Ensure the code does not exceed {line_count} lines.\n\n"
