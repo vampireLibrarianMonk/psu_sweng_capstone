@@ -376,7 +376,8 @@ def analyze_file_with_bandit(file_path, logger):
         issues = manager.get_issue_list()
 
         # Generate a timestamped filename for the Bandit report
-        bandit_output_file = os.path.join(bandit_output_dir, f"bandit_single_file_{name}.json")
+        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        bandit_output_file = os.path.join(bandit_output_dir, f"{timestamp}_bandit_single_file_{name}.json")
 
         # Write Bandit report to JSON file
         with open(bandit_output_file, 'w') as report_file:
@@ -427,7 +428,8 @@ def analyze_file_with_dodgy(file_path, logger):
     base_name = os.path.basename(file_path)
     name, _ = os.path.splitext(base_name)
 
-    dodgy_output_file = os.path.join(dodgy_output_dir, f"dodgy_single_file_{name}.json")
+    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+    dodgy_output_file = os.path.join(dodgy_output_dir, f"{timestamp}_dodgy_single_file_{name}.json")
 
     try:
         # Read file contents
@@ -503,7 +505,8 @@ def analyze_file_with_semgrep(file_path, extracted_libraries, logger):
 
     try:
         os.makedirs(semgrep_output_dir, exist_ok=True)
-        semgrep_output_file = os.path.join(semgrep_output_dir, f"semgrep_report_{name}.json")
+        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        semgrep_output_file = os.path.join(semgrep_output_dir, f"{timestamp}_semgrep_report_{name}.json")
 
         # Define Semgrep configurations to run
         semgrep_configs = [
@@ -751,6 +754,7 @@ def run_mitigation_loop(
         llm,
         logger,
         mitigated_folder,
+        mitigated_base_name,
         original_code,
         section):
 
@@ -773,7 +777,7 @@ def run_mitigation_loop(
 
     iteration = 0
     name, ext = os.path.splitext(base_name)
-    mitigated_file_name = f"{name}_mitigated_iteration_{section}_{iteration}{ext}"
+    mitigated_file_name = f"{mitigated_base_name}_iteration_{section}_{iteration}{ext}"
     mitigated_file_path = os.path.join(mitigated_folder, mitigated_file_name)
     save_code_to_file(original_code, mitigated_file_path, logger)
 
@@ -817,7 +821,7 @@ def run_mitigation_loop(
 
         # Read the specified file
         try:
-            mitigated_file_name = f"{name}_mitigated_iteration_{section}_{iteration}{ext}"
+            mitigated_file_name = f"{mitigated_base_name}_iteration_{section}_{iteration}{ext}"
             mitigated_file_path = os.path.join(mitigated_folder, mitigated_file_name)
             with open(mitigated_file_path, 'r') as file:
                 mitigated_code = file.read()
@@ -854,28 +858,39 @@ def run_mitigation_loop(
                 [f"\t* For '{vuln_module}', {guidance}" for vuln_module, guidance in suggestion_map.items()]
             )
             substitution_code_instruction = (
-                f"Please provide an adjusted secure version of the code below, addressing the following issues:\n"
+                f"Please modify the code below strictly according to the provided instructions. Address only the "
+                f"specific issues mentioned in the following substitution statements as they pertain to the code below,"
+                f" without adding or assuming anything beyond what is explicitly stated:\n"
                 f"{substitution_statements}\n"
             )
         else:
-            substitution_code_instruction = (
-                "Please provide an adjusted secure version of the code below, addressing the identified issues.\n"
-            )
+            substitution_code_instruction = ""
 
         # Construct the complete prompt
         bandit_issues_section = (f"Bandit has identified the following issues"
-                                 f" in the provided Python code:\n{bandit_issues}\n\n") if bandit_issues else ""
+                                 f" in the provided Python code:\n{bandit_issues}\n\n") \
+            if bandit_issues != "" else ""
+
         dodgy_issues_section = (f"Dodgy has identified the following issues"
-                                f" in the provided Python code:\n{dodgy_issues}\n\n") if dodgy_issues else ""
+                                f" in the provided Python code:\n{dodgy_issues}\n\n") \
+            if dodgy_issues != "No issues found." else ""
+
         semgrep_issues_section = (f"Semgrep has identified the following issues"
-                                  f" in the provided Python code:\n{semgrep_issues}\n\n") if semgrep_issues else ""
+                                  f" in the provided Python code:\n{semgrep_issues}\n\n") \
+            if semgrep_issues != "No issues found." else ""
 
         code_prompt = (
             f"Ensure that all recommendations adhere to best security practices.\n"
             f"{bandit_issues_section}"
             f"{dodgy_issues_section}"
             f"{semgrep_issues_section}"
-            f"Always retrieve credentials securely using os.environ.get() instead of hardcoding them.\n\n"
+            f'Never hard code any credentials, keys, or other sensitive data. Always retrieve sensitive information securely from '
+            f'environment variables, configuration files, or external services. Avoid embedding sensitive data directly in strings, '
+            f'commands, or code logic that could expose them. When working with tools like SSH for automation, use methods such as '
+            f'passing sensitive data through environment variables (e.g., using "sshpass --env" to reference an environment variable for a password) '
+            f'to prevent exposure in command-line arguments. Ensure that temporary sensitive data is cleared from memory or the environment '
+            f'immediately after use to minimize risks. Additionally, avoid using variable names containing "password" or similar terms for storing sensitive data.\n'
+            f"them in command-line arguments.\n\n"
             f"{substitution_code_instruction}\n"
             f"Ensure the code does not exceed {word_count} words.\n"
             f"Ensure the code does not exceed {line_count} lines.\n\n"
@@ -932,7 +947,7 @@ def run_mitigation_loop(
         if code_block:
             name, ext = os.path.splitext(base_name)
             iteration += 1
-            mitigated_file_name = f"{name}_mitigated_iteration_{section}_{iteration}{ext}"
+            mitigated_file_name = f"{mitigated_base_name}_iteration_{section}_{iteration}{ext}"
             mitigated_file_path = os.path.join(mitigated_folder, mitigated_file_name)
             logger.info(f"Applied autoimport to {mitigated_file_path}; imports have been updated.")
             fixed_code = autoimport.fix_code(code_block)
