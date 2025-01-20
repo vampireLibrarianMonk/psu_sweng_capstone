@@ -13,3 +13,4 @@ dodgy_reports
 semgrep_reports
 .scannerwork
 comparisons
+generated_unit_test

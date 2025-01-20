@@ -1,11 +1,11 @@
 import argparse
 import ast
+import fnmatch
 import json
 import logging
 import os
 import re
 import subprocess
-from datetime import datetime
 
 import autoimport
 import pyrsmi.rocml as rocml
@@ -26,12 +26,13 @@ os.makedirs(dodgy_output_dir, exist_ok=True)
 semgrep_output_dir = "reports/semgrep"
 os.makedirs(semgrep_output_dir, exist_ok=True)
 
-
-def setup_logger(log_suffix="log"):
+def setup_logger(log_suffix, letter_conversion, name):
     """
     Set up a logger that writes logs to a file with a timestamped filename.
 
     Args:
+        name: Name of operation being run.
+        letter_conversion: Number converted to excel column letter.
         log_suffix (str): A custom suffix for the log file name to differentiate logs.
 
     Returns:
@@ -39,18 +40,19 @@ def setup_logger(log_suffix="log"):
     """
     # Create the 'logs' folder if it doesn't exist
     log_folder = "logs"
-    os.makedirs(log_folder, exist_ok=True)
 
     # Generate a filename with a datetime group and custom suffix
-    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-    log_filename = os.path.join(log_folder, f"{timestamp}_{log_suffix}.log")
+    log_filepath = os.path.join(log_folder, log_suffix, name, letter_conversion, "main.log")
+
+    # Create the base log directory
+    os.makedirs(os.path.dirname(log_filepath), exist_ok=True)
 
     # Create and configure the logger
     logger = logging.getLogger(f"CustomLogger_{log_suffix}")
     logger.setLevel(logging.DEBUG)  # Set the logging level
 
     # Create file handler to write logs to the file
-    file_handler = logging.FileHandler(log_filename)
+    file_handler = logging.FileHandler(log_filepath)
     file_handler.setLevel(logging.DEBUG)
 
     # Create console handler to output logs to the console (optional)
@@ -69,6 +71,60 @@ def setup_logger(log_suffix="log"):
     logger.addHandler(console_handler)
 
     return logger
+
+
+def count_directories_in_path(directory):
+    """
+    Counts the number of directories in the specified path.
+
+    :param directory: The path to the directory where subdirectories are counted.
+    :return: The count of subdirectories in the specified path.
+    """
+    count = 0
+    try:
+        # Iterate over all items in the specified directory
+        for item in os.listdir(directory):
+            # Check if the item is a directory
+            if os.path.isdir(os.path.join(directory, item)):
+                count += 1
+    except FileNotFoundError:
+        print(f"The directory {directory} does not exist.")
+    except PermissionError:
+        print(f"Permission denied to access {directory}.")
+    return count
+
+
+def number_to_excel_column(n):
+    """
+    Convert a zero-based index to an Excel-style column name.
+
+    :param n: Zero-based index (e.g., 0 corresponds to 'A')
+    :return: Corresponding Excel-style column name as a string
+    """
+    result = []
+    while n >= 0:
+        n, remainder = divmod(n, 26)
+        result.append(chr(remainder + ord('A')))
+        n -= 1
+    return ''.join(reversed(result))
+
+
+def is_python_file(file_path):
+    # Check if the file has a .py extension
+    if not file_path.endswith('.py'):
+        return False
+
+    # Check if the file exists and is a file
+    if not os.path.isfile(file_path):
+        return False
+
+    # Optionally, check for a Python shebang in the first line
+    # with open(file_path, 'r') as file:
+    #     first_line = file.readline().strip()
+    #     if first_line.startswith('#!') and 'python' in first_line:
+    #         return True
+
+    return True
 
 
 def parse_python_script(file_path):
@@ -361,7 +417,7 @@ def get_optimal_gpu_layers(input_model_path, input_total_layers, safety_margin_g
     return max(0, min(optimal_layers, input_total_layers))
 
 
-def analyze_file_with_bandit(file_path, logger):
+def analyze_file_with_bandit(file_path, letter_conversion, logger):
     # Get and separate file name into its base name and extension
     base_name = os.path.basename(file_path)
     name, ext = os.path.splitext(base_name)
@@ -376,8 +432,10 @@ def analyze_file_with_bandit(file_path, logger):
         issues = manager.get_issue_list()
 
         # Generate a timestamped filename for the Bandit report
-        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        bandit_output_file = os.path.join(bandit_output_dir, f"{timestamp}_bandit_single_file_{name}.json")
+        bandit_output_file = os.path.join(bandit_output_dir, name, letter_conversion, f"bandit.json")
+
+        # Create custom directory
+        os.makedirs(os.path.dirname(bandit_output_file), exist_ok=True)
 
         # Write Bandit report to JSON file
         with open(bandit_output_file, 'w') as report_file:
@@ -413,7 +471,7 @@ def get_bandit_issues(input_bandit_file):
     return bandit_issues
 
 
-def analyze_file_with_dodgy(file_path, logger):
+def analyze_file_with_dodgy(file_path, letter_conversion, logger):
     """
     Analyzes a single file using Dodgy and saves the results to a JSON report.
 
@@ -428,8 +486,10 @@ def analyze_file_with_dodgy(file_path, logger):
     base_name = os.path.basename(file_path)
     name, _ = os.path.splitext(base_name)
 
-    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-    dodgy_output_file = os.path.join(dodgy_output_dir, f"{timestamp}_dodgy_single_file_{name}.json")
+    dodgy_output_file = os.path.join(dodgy_output_dir, name, letter_conversion, f"dodgy.json")
+
+    # Create custom directory
+    os.makedirs(os.path.dirname(dodgy_output_file), exist_ok=True)
 
     try:
         # Read file contents
@@ -488,11 +548,12 @@ def get_dodgy_issues(input_dodgy_file):
     return "\n".join(dodgy_issues) if dodgy_issues else "No issues found."
 
 
-def analyze_file_with_semgrep(file_path, extracted_libraries, logger):
+def analyze_file_with_semgrep(file_path, letter_conversion, extracted_libraries, logger):
     """
     Analyzes a Python file using Semgrep and saves a standardized report in JSON format.
 
     Args:
+        letter_conversion: Excel column conversion from integer.
         file_path (str): Path to the Python file to analyze.
         extracted_libraries (list): List of libraries used in the Python file.
         logger (logging.Logger): Logger object for logging information and errors.
@@ -504,9 +565,10 @@ def analyze_file_with_semgrep(file_path, extracted_libraries, logger):
     name, _ = os.path.splitext(base_name)
 
     try:
-        os.makedirs(semgrep_output_dir, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        semgrep_output_file = os.path.join(semgrep_output_dir, f"{timestamp}_semgrep_report_{name}.json")
+        semgrep_output_file = os.path.join(semgrep_output_dir, name, letter_conversion, f"semgrep.json")
+
+        # Create custom directory
+        os.makedirs(os.path.dirname(semgrep_output_file), exist_ok=True)
 
         # Define Semgrep configurations to run
         semgrep_configs = [
@@ -755,6 +817,7 @@ def run_mitigation_loop(
         logger,
         mitigated_folder,
         mitigated_base_name,
+        letter_conversion,
         original_code,
         section):
 
@@ -786,13 +849,13 @@ def run_mitigation_loop(
     # Bandit is a static analysis tool designed to deeply inspect Python code for security issues.
     # It focuses on detecting vulnerabilities at the code level, such as the use of unsafe functions
     # (e.g., eval, exec), insecure cryptographic practices and code injection risks.
-    bandit_scan_json_path = analyze_file_with_bandit(mitigated_file_path, logger)
+    bandit_scan_json_path = analyze_file_with_bandit(mitigated_file_path, letter_conversion, logger)
     bandit_issues = get_bandit_issues(bandit_scan_json_path)
 
     # Dodgy is a lightweight security tool that complements Bandit by focusing on file-level issues.
     # It scans for hardcoded secrets (e.g., API keys, passwords), suspicious filenames (e.g., *.pem, id_rsa),
     # and insecure file paths (e.g., /tmp directories).
-    dodgy_scan_json_path = analyze_file_with_dodgy(mitigated_file_path, logger)
+    dodgy_scan_json_path = analyze_file_with_dodgy(mitigated_file_path, letter_conversion, logger)
     dodgy_issues = get_dodgy_issues(dodgy_scan_json_path)
 
     # Semgrep
@@ -801,7 +864,7 @@ def run_mitigation_loop(
 
     # A lightweight static analysis tool that scans code for security vulnerabilities and enforces coding standards.
     # It offers customizable rules and supports taint analysis to track untrusted data through your codebase.
-    semgrep_scan_json_path = analyze_file_with_semgrep(mitigated_file_path, extracted_libraries, logger)
+    semgrep_scan_json_path = analyze_file_with_semgrep(mitigated_file_path, letter_conversion, extracted_libraries, logger)
     semgrep_issues = get_semgrep_issues(semgrep_scan_json_path)
 
     # Dependencies Scans
@@ -906,35 +969,15 @@ def run_mitigation_loop(
         # Adjust temperature to control randomness; increase to make output more diverse
         temperature = round(min(max_temperature, initial_temperature + temperature_increment * iteration), 2)
 
-        # Generate code with adjusted parameters
-        """
-        Parameters for adjustment
-        ----------
-        temperature : float, optional
-            Controls the randomness of the output, with a range from 0 to 2. Lower values (e.g., 0.2) produce more 
-            focused and deterministic responses, while higher values (e.g., 0.8) yield more varied and creative outputs.
-             It is generally recommended to adjust either `temperature` or `top_p`, but not both simultaneously. 
-
-        top_p : float, optional
-            Also known as nucleus sampling, this parameter ranges from 0 to 1 and determines the diversity of the output
-             by considering only the tokens that comprise the top `p` probability mass. For instance, a `top_p` of 0.1 
-             means only the tokens within the top 10% probability mass are considered. Adjusting `top_p` can influence 
-             the creativity of the response, with lower values leading to more focused outputs.
-
-        top_k : int, optional
-            Limits the next token selection to the top `k` tokens with the highest probabilities. Setting `top_k` to 0 
-            effectively disables this filtering, allowing the model to consider all possible tokens. Adjusting `top_k` 
-            can control the diversity of the output, with lower values leading to more focused and deterministic 
-            responses.
-        """
-        logger.info(f"Using an adjusted temperature of {temperature}.")
-        adjusted_code_response = llm.create_chat_completion(
-            messages=messages,  # system and user prompt
-            temperature=temperature,
-            top_p=1,
-            top_k=0,
-            stream=True,  # Enable streaming
-            stop=["<|endoftext|>"]  # Stop generation at the end-of-text token
+        # Create chat completion llama object
+        adjusted_code_response = create_chat_completion_llm(
+            llm,
+            messages,
+            temperature,
+            1,
+            0,
+            True,
+            ["<|endoftext|>"]
         )
 
         # Process the streamed response
@@ -958,18 +1001,47 @@ def run_mitigation_loop(
             break
 
         # Perform scans again
-        logger.info(f"Performing scans on {mitigated_file_path}")
-        bandit_scan_json_path = analyze_file_with_bandit(mitigated_file_path, logger)
-        bandit_issues = get_bandit_issues(bandit_scan_json_path)
+        stop_iteration = perform_scans(mitigated_file_path, letter_conversion, extracted_libraries, logger)
 
-        dodgy_scan_json_path = analyze_file_with_dodgy(mitigated_file_path, logger)
-        dodgy_issues = get_dodgy_issues(dodgy_scan_json_path)
-
-        semgrep_scan_json_path = analyze_file_with_semgrep(mitigated_file_path, extracted_libraries, logger)
-        semgrep_issues = get_semgrep_issues(semgrep_scan_json_path)
-
-        if bandit_issues == '' and dodgy_issues == 'No issues found.' and semgrep_issues == 'No issues found.':
+        if stop_iteration:
             return code_block
+
+
+def perform_scans(file_path, associated_letter_conversion, libraries, logger):
+    # Perform scans again
+    logger.info(f"Performing scans on {file_path}")
+
+    # Bandit
+    bandit_scan_json_path = analyze_file_with_bandit(file_path, associated_letter_conversion, logger)
+    bandit_issues = get_bandit_issues(bandit_scan_json_path)
+
+    if bandit_issues == '':
+        logger.info("No issues encountered after bandit scan.")
+    else:
+        logger.info(f"Issues found in bandit scan: {bandit_scan_json_path}")
+
+    # Dodgy
+    dodgy_scan_json_path = analyze_file_with_dodgy(file_path, associated_letter_conversion, logger)
+    dodgy_issues = get_dodgy_issues(dodgy_scan_json_path)
+
+    if dodgy_issues == 'No issues found.':
+        logger.info("No issues encountered after dodgy scan.")
+    else:
+        logger.info(f"Issues found in dodgy scan: {bandit_scan_json_path}")
+
+    # Semgrep
+    semgrep_scan_json_path = analyze_file_with_semgrep(file_path, associated_letter_conversion, libraries, logger)
+    semgrep_issues = get_semgrep_issues(semgrep_scan_json_path)
+
+    if semgrep_issues == 'No issues found.':
+        logger.info("No issues encountered after semgrep scan.")
+    else:
+        logger.info(f"Issues found in semgrep scan: {bandit_scan_json_path}")
+
+    return_boolean = bandit_issues == '' and dodgy_issues == 'No issues found.' and semgrep_issues == 'No issues found.'
+
+    return return_boolean
+
 
 def save_code_to_file(code, path, logger):
     """
@@ -984,10 +1056,99 @@ def save_code_to_file(code, path, logger):
         file_io.write(code)
     logger.info(f"Code saved to file: {path}")
 
+
 def write_to_file(file_path, content):
     """Helper function to write content to a file."""
     with open(file_path, 'w') as file:
         file.write(content)
+
+
+def create_chat_completion_llm(llm, messages, temperature=1.0, top_p=1.0, top_k=0, stream=False, stop=None):
+    """
+    Generates a chat completion using the specified language model (LLM) and parameters.
+
+    Parameters
+    ----------
+    llm : Llama
+        The language model instance used to generate the chat completion. This object should have a method
+        `create_chat_completion` that accepts the parameters defined below.
+
+    messages : list of dict
+        A list of message dictionaries that form the conversation history. Each dictionary should contain
+        keys such as 'role' (e.g., 'user', 'assistant') and 'content' (the message text).
+
+    temperature : float, optional
+        Controls the randomness of the output, with a range from 0 to 2. Lower values (e.g., 0.2) produce more
+        focused and deterministic responses, while higher values (e.g., 0.8) yield more varied and creative outputs.
+        It is generally recommended to adjust either `temperature` or `top_p`, but not both simultaneously.
+
+    top_p : float, optional
+        Also known as nucleus sampling, this parameter ranges from 0 to 1 and determines the diversity of the output
+        by considering only the tokens that comprise the top `p` probability mass. For instance, a `top_p` of 0.1
+        means only the tokens within the top 10% probability mass are considered. Adjusting `top_p` can influence
+        the creativity of the response, with lower values leading to more focused outputs.
+
+    top_k : int, optional
+        Limits the next token selection to the top `k` tokens with the highest probabilities. Setting `top_k` to 0
+        effectively disables this filtering, allowing the model to consider all possible tokens. Adjusting `top_k`
+        can control the diversity of the output, with lower values leading to more focused and deterministic
+        responses.
+
+    stream : bool, optional
+        If set to True, enables streaming of the response, allowing partial outputs to be received as they are
+        generated. If False, the function will return the complete response after generation.
+
+    stop : list of str or None, optional
+        Defines stopping criteria for the generation. If a list of strings is provided, the generation will halt
+        when any of the specified strings are encountered in the output. If None, no specific stopping criteria
+        are applied.
+
+    Returns
+    -------
+    dict
+        A dictionary containing the generated chat completion. The structure of the returned dictionary depends
+        on the implementation of the `create_chat_completion` method of the `llm` object.
+
+    Notes
+    -----
+    - Ensure that the `llm` object provided has a `create_chat_completion` method compatible with the parameters
+      specified above.
+    - The `messages` parameter should accurately represent the conversation history to generate coherent and
+      contextually relevant responses.
+    - Adjusting `temperature`, `top_p`, and `top_k` can significantly impact the quality and style of the generated
+      responses. Experiment with different values to achieve the desired outcome.
+
+    Example
+    -------
+    ```python
+    llm_instance = SomeLLMModel()
+    conversation_history = [
+        {"role": "user", "content": "Hello, how are you?"},
+        {"role": "assistant", "content": "I'm good, thank you! How can I assist you today?"}
+    ]
+    response = create_chat_completion_llm(
+        llm=llm_instance,
+        messages=conversation_history,
+        temperature=0.7,
+        top_p=0.9,
+        top_k=50,
+        stream=False,
+        stop=["\n"]
+    )
+    print(response)
+    ```
+    """
+    chat_completion_llm = llm.create_chat_completion(
+        messages=messages,
+        temperature=temperature,  # Set temperature for deterministic output
+        top_p=top_p,              # Use nucleus sampling with top_p probability
+        top_k=top_k,              # Limit next token selection to top_k tokens
+        stream=stream,            # Enable or disable streaming of the response
+        stop=stop                 # Define stopping criteria for generation
+    )
+
+    return chat_completion_llm
+
 
 def test_llm():
     # Initialize the logger
