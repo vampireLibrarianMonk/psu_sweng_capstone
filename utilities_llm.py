@@ -1,6 +1,5 @@
 import argparse
 import ast
-import fnmatch
 import json
 import logging
 import os
@@ -16,6 +15,8 @@ from bandit.formatters.text import get_metrics
 from dodgy.checks import check_file_contents
 from gguf_parser import GGUFParser
 from llama_cpp import Llama
+
+from typing import List, Tuple, Optional
 
 bandit_output_dir = "reports/bandit"
 os.makedirs(bandit_output_dir, exist_ok=True)
@@ -125,6 +126,97 @@ def is_python_file(file_path):
     #         return True
 
     return True
+
+
+def generate_import_statement(file_path):
+    # Normalize the path and split off the base name and extension
+    base_name = os.path.basename(file_path)
+    name, ext = os.path.splitext(base_name)
+
+    # Remove the base file name from the path, and replace slashes with dots
+    module_path = file_path.replace(ext, '').replace('/', '.')
+
+    # Split into components
+    *module_parts, module_name = module_path.split('.')
+
+    # Construct the import statement
+    import_statement = f"from {'.'.join(module_parts)}.{module_name}"
+    return import_statement
+
+
+def get_methods_from_file(file_path):
+    """
+    Extracts all method names and their corresponding code from a Python script.
+
+    Args:
+        file_path (str): Path to the Python script file.
+
+    Returns:
+        list: A list of tuples, where each tuple contains the method name and its corresponding code.
+    """
+    methods = []
+
+    # Read the file content
+    with open(file_path, "r", encoding="utf-8") as file:
+        file_content = file.read()
+
+    # Parse the file content into an AST
+    tree = ast.parse(file_content)
+
+    # Walk through the nodes of the AST
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):  # Check for function definitions
+            method_name = node.name
+            method_code = ast.get_source_segment(file_content, node)
+            methods.append((method_name, method_code))
+
+    return methods
+
+
+def get_methods_with_signatures(file_path: str) -> List[Tuple[str, str, Optional[str]]]:
+    """
+    Extracts method names, their input parameters with types, and return types from a Python script.
+
+    Args:
+        file_path (str): Path to the Python script file.
+
+    Returns:
+        List[Tuple[str, str, Optional[str]]]: A list of tuples, each containing:
+            - Method name (str)
+            - Method signature (str)
+            - Return type (Optional[str])
+    """
+    methods = []
+
+    # Read the file content
+    with open(file_path, "r", encoding="utf-8") as file:
+        file_content = file.read()
+
+    # Parse the file content into an AST
+    tree = ast.parse(file_content)
+
+    # Walk through the nodes of the AST
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):  # Check for function definitions
+            method_name = node.name
+
+            # Retrieve the function's signature
+            args = []
+            for arg in node.args.args:
+                arg_name = arg.arg
+                arg_type = ast.unparse(arg.annotation) if arg.annotation else 'Any'
+                args.append(f"{arg_name}: {arg_type}")
+            args_str = ", ".join(args)
+
+            # Retrieve the return type
+            return_type = ast.unparse(node.returns) if node.returns else 'Any'
+
+            # Format the method signature
+            method_signature = f"def {method_name}({args_str}) -> {return_type}"
+
+            methods.append((method_name, method_signature, return_type))
+
+    return methods
 
 
 def parse_python_script(file_path):
@@ -947,12 +1039,14 @@ def run_mitigation_loop(
             f"{bandit_issues_section}"
             f"{dodgy_issues_section}"
             f"{semgrep_issues_section}"
-            f'Never hard code any credentials, keys, or other sensitive data. Always retrieve sensitive information securely from '
-            f'environment variables, configuration files, or external services. Avoid embedding sensitive data directly in strings, '
-            f'commands, or code logic that could expose them. When working with tools like SSH for automation, use methods such as '
-            f'passing sensitive data through environment variables (e.g., using "sshpass --env" to reference an environment variable for a password) '
-            f'to prevent exposure in command-line arguments. Ensure that temporary sensitive data is cleared from memory or the environment '
-            f'immediately after use to minimize risks. Additionally, avoid using variable names containing "password" or similar terms for storing sensitive data.\n'
+            f'Never hard code any credentials, keys, or other sensitive data. Always retrieve sensitive information '
+            f'securely from environment variables, configuration files, or external services. Avoid embedding sensitive'
+            f' data directly in strings, commands, or code logic that could expose them. When working with tools like '
+            f'SSH for automation, use methods such as passing sensitive data through environment variables (e.g., using'
+            f' "sshpass --env" to reference an environment variable for a password) to prevent exposure in command-line'
+            f' arguments. Ensure that temporary sensitive data is cleared from memory or the environment immediately '
+            f'after use to minimize risks. Additionally, avoid using variable names containing "password" or similar '
+            f'terms for storing sensitive data.\n'
             f"them in command-line arguments.\n\n"
             f"{substitution_code_instruction}\n"
             f"Ensure the code does not exceed {word_count} words.\n"
