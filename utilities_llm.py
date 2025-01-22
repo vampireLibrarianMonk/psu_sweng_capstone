@@ -109,6 +109,16 @@ def number_to_excel_column(n):
         n -= 1
     return ''.join(reversed(result))
 
+def prepend_to_file(file_path, content_to_prepend):
+    # Read the existing content of the file
+    with open(file_path, 'r') as file:
+        existing_content = file.read()
+
+    # Write the new content followed by the existing content
+    with open(file_path, 'w') as file:
+        file.write(content_to_prepend)
+        file.write(existing_content)
+
 
 def is_python_file(file_path):
     # Check if the file has a .py extension
@@ -167,8 +177,9 @@ def get_methods_from_file(file_path):
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef):  # Check for function definitions
             method_name = node.name
-            method_code = ast.get_source_segment(file_content, node)
-            methods.append((method_name, method_code))
+            # method_code = ast.get_source_segment(file_content, node)
+            # methods.append((method_name, method_code))
+            methods.append(method_name)
 
     return methods
 
