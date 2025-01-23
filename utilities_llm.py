@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import subprocess
+import traceback
 
 import autoimport
 import pyrsmi.rocml as rocml
@@ -109,6 +110,7 @@ def number_to_excel_column(n):
         n -= 1
     return ''.join(reversed(result))
 
+
 def prepend_to_file(file_path, content_to_prepend):
     # Read the existing content of the file
     with open(file_path, 'r') as file:
@@ -119,6 +121,22 @@ def prepend_to_file(file_path, content_to_prepend):
         file.write(content_to_prepend)
         file.write(existing_content)
 
+def rename_file(current_file_name, new_file_name):
+    """
+    Rename a file from current_file_name to new_file_name.
+
+    :param current_file_name: The current name of the file.
+    :param new_file_name: The new name for the file.
+    """
+    try:
+        os.rename(current_file_name, new_file_name)
+        print(f"File renamed from {current_file_name} to {new_file_name}.")
+    except FileNotFoundError:
+        print(f"The file {current_file_name} does not exist.")
+    except PermissionError:
+        print("You do not have the necessary permissions to rename this file.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
 
 def is_python_file(file_path):
     # Check if the file has a .py extension
@@ -1253,6 +1271,20 @@ def create_chat_completion_llm(llm, messages, temperature=1.0, top_p=1.0, top_k=
     )
 
     return chat_completion_llm
+
+
+def execute_unit_test_file(unit_test_file_path):
+    try:
+        # Run the pytest command on the generated unit test file
+        result = subprocess.run(
+            ["pytest", unit_test_file_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        return result.stdout, result.stderr
+    except Exception as e:
+        return "", traceback.format_exc()
 
 
 def test_llm():
