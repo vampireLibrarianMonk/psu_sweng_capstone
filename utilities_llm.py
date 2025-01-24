@@ -5,9 +5,12 @@ import logging
 import os
 import re
 import subprocess
+import tokenize
 import traceback
+from io import StringIO
 
 import autoimport
+import autopep8
 import pyrsmi.rocml as rocml
 import stdlib_list
 from bandit.core.config import BanditConfig
@@ -844,6 +847,26 @@ def validate_bandit_allowance(value):
         raise argparse.ArgumentTypeError(f"Invalid value '{value}'. bandit_allowance must be a positive integer.")
     return ivalue
 
+def validate_correction_limit(value):
+    """
+    Validates that the provided bandit_allowance is a positive integer.
+
+    Args:
+        value (str): The input value to validate.
+
+    Returns:
+        int: The validated positive integer.
+
+    Raises:
+        argparse.ArgumentTypeError: If the input is not a positive integer.
+    """
+    try:
+        ivalue = int(value)
+        if ivalue <= 0:
+            raise ValueError
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Invalid value '{value}'. bandit_allowance must be a positive integer.")
+    return ivalue
 
 def extract_module_names(text):
     """
@@ -931,6 +954,102 @@ def process_streamed_output(response, print_stream=False):
     return complete_output
 
 
+def remove_comments_and_docstrings(source):
+    """
+    Remove comments and docstrings from the provided Python source code.
+
+    Args:
+        source (str): The original Python source code as a string.
+
+    Returns:
+        str: The source code with comments and docstrings removed.
+    """
+    output = []
+    prev_toktype = tokenize.INDENT
+    last_lineno = -1
+    last_col = 0
+
+    tokens = tokenize.generate_tokens(StringIO(source).readline)
+    for toktype, ttext, (slineno, scol), (elineno, ecol), ltext in tokens:
+        if slineno > last_lineno:
+            last_col = 0
+        if scol > last_col:
+            output.append(" " * (scol - last_col))
+        if toktype == tokenize.COMMENT:
+            # Skip comments
+            pass
+        elif toktype == tokenize.STRING and prev_toktype == tokenize.INDENT:
+            # Skip docstrings
+            pass
+        else:
+            output.append(ttext)
+        prev_toktype = toktype
+        last_col = ecol
+        last_lineno = elineno
+
+    return ''.join(output)
+
+def run_code_quality_scan(llm, input_file_path, logger):
+    logger.info(f"Running customized static code quality scan on {input_file_path}.")
+
+    # Read the contents of the organized file
+    with open(input_file_path, 'r') as file:
+        code_content = file.read()
+        code_content = remove_comments_and_docstrings(code_content)
+        autopep8.fix_code(code_content)
+
+    system_prompt = """
+    You are a Python assistant. Analyze provided code snippets and list issues that would result in exceptions/errors in 
+    concise, one-line formats. Each entry should include the priority level in square brackets, the line number(s), 
+    and a brief corrective action. Ensure the output is clear and consistent for easy regex parsing. Important: Do not
+    suggest code modifications or rewrites; only identify potential exceptions/errors. Exclude analysis of security
+    vulnerabilities.
+    """
+
+    user_prompt = f"""
+    Provide concise, one-line outputs for each issue in the format [PRIORITY] Line X: Corrective Action, where PRIORITY
+     is LOW, MEDIUM, HIGH, or CRITICAL based on the urgency of the fix.
+
+    {code_content}
+    """
+
+    unit_test_messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+
+    unit_test_summary_llm_config = create_chat_completion_llm(
+        llm,
+        messages=unit_test_messages,
+        temperature=0.0,  # Set temperature for deterministic output
+        top_p=1,  # Use nucleus sampling with top_p probability
+        top_k=0,  # Disable top-k sampling
+        stream=True,  # Enable streaming of the response
+        stop=["<|endoftext|>"]  # Define stopping criteria for generation
+    )
+
+    # Process the streamed output to obtain the adjusted code block
+    response = process_streamed_output(unit_test_summary_llm_config)
+
+    # Define the regex pattern
+    pattern = r"\[(LOW|MEDIUM|HIGH)\] Line (\d+(-\d+)?): (.+)"
+
+    # Parse the output
+    matches = re.findall(pattern, response)
+
+    # Print parsed results
+    parsed_issues = []
+    for match in matches:
+        priority = match[0]
+        # line_numbers = match[1]
+        corrective_action = match[3]
+        if "logger" not in corrective_action:
+            parsed_issues.append(f"priority: {priority}, corrective action: {corrective_action}")
+
+    parsed_issues_string = "\n".join(parsed_issues)
+
+    return parsed_issues_string
+
 def run_mitigation_loop(
         bandit_allowance,
         base_name,
@@ -964,6 +1083,9 @@ def run_mitigation_loop(
     mitigated_file_name = f"{mitigated_base_name}_iteration_{section}_{iteration}{ext}"
     mitigated_file_path = os.path.join(mitigated_folder, mitigated_file_name)
     save_code_to_file(original_code, mitigated_file_path, logger)
+
+    # Set code quality issues to empty list
+    other_issues = []
 
     # Perform Vulnerability Scans
     # Static Code Analysis
@@ -1063,24 +1185,48 @@ def run_mitigation_loop(
                                   f" in the provided Python code:\n{semgrep_issues}\n\n") \
             if semgrep_issues != "No issues found." else ""
 
+        other_issues_section = f"Address these other issues as well:\n{other_issues}\n\n" \
+            if len(other_issues) != 0 else ""
+
         code_prompt = (
-            f"Ensure that all recommendations adhere to best security practices.\n"
+            f"**Adhere to Best Security Practices:**\n\n"
             f"{bandit_issues_section}"
             f"{dodgy_issues_section}"
             f"{semgrep_issues_section}"
-            f'Never hard code any credentials, keys, or other sensitive data. Always retrieve sensitive information '
-            f'securely from environment variables, configuration files, or external services. Avoid embedding sensitive'
-            f' data directly in strings, commands, or code logic that could expose them. When working with tools like '
-            f'SSH for automation, use methods such as passing sensitive data through environment variables (e.g., using'
-            f' "sshpass --env" to reference an environment variable for a password) to prevent exposure in command-line'
-            f' arguments. Ensure that temporary sensitive data is cleared from memory or the environment immediately '
-            f'after use to minimize risks. Additionally, avoid using variable names containing "password" or similar '
-            f'terms for storing sensitive data.\n'
-            f"them in command-line arguments.\n\n"
-            f"{substitution_code_instruction}\n"
-            f"Ensure the code does not exceed {word_count} words.\n"
-            f"Ensure the code does not exceed {line_count} lines.\n\n"
-            f"Only include the code, along with appropriate docstrings and inline comments:\n\n"
+            f"{other_issues_section}"            
+            f"**Never hard code credentials, keys, or sensitive data.** Retrieve them securely from environment variables, "
+            f"configuration files, or external services. Avoid embedding sensitive data directly in code. When automating with "
+            f"tools like SSH, pass sensitive data through environment variables (e.g., using 'sshpass --env' for passwords) to "
+            f"prevent exposure in command-line arguments. Ensure temporary sensitive data is cleared from memory or the environment "
+            f"immediately after use. Avoid using variable names containing 'password' or similar terms for storing sensitive data.\n\n"
+
+            f"**Define Method Signatures:**\n\n"
+            f"- Use explicit type annotations for all parameters and return values; ensure that both parameter types and return types are specified for every function and method.\n"
+            f"- Employ clear and descriptive parameter names.\n"
+            f"- Specify specific non-vague types; avoid `object` and `None` as a return types.\n"
+            f"- Include any relevant constraints or modifiers.\n\n"
+
+            f"**Ensure Exception Handling:**\n\n"
+            f"- Propagate original exceptions/errors to maintain traceback information; avoid re-raising exceptions as different types.\n"
+            f"- **Avoid using print statements or logging within exception/error blocks.**\n"
+            f"- **Never return `None`;** instead, raise appropriate exceptions or provide meaningful return values.\n"
+            f"- Handle unexpected input types by:\n"
+            f"  - Validating input types at the function's start.\n"
+            f"  - Raising a `TypeError` for inappropriate argument types.\n"
+            f"  - Raising a `ValueError` for arguments with correct types but inappropriate values.\n"
+            f"  - Providing clear, informative error messages to facilitate debugging.\n\n"
+
+            f"**Ensure Accurate Docstrings:**\n\n"
+            f"- Clearly describe the function's purpose, parameters, return types, and exceptions raised.\n"
+            f"- Follow standard conventions for clarity and consistency.\n\n"
+
+            f"{substitution_code_instruction}\n\n"
+            
+            f"Ensure the code does not exceed {word_count} words or {line_count} lines.\n\n"
+            
+            f"Include only the code with appropriate docstrings and inline comments.\n\n"
+            
+            f"Ensure adequate logging is implemented.\n\n"
             f"```python\n{mitigated_code}\n```"
         )
 
@@ -1123,10 +1269,19 @@ def run_mitigation_loop(
             logger.warning("No adjusted code block found in the secure code suggestion. Stopping to diagnose issue.")
             break
 
-        # Perform scans again
-        stop_iteration = perform_scans(mitigated_file_path, letter_conversion, extracted_libraries, logger)
+        # Perform vulnerability scans again
+        (bandit_issues,
+         dodgy_issues,
+         semgrep_issues) = perform_scans(mitigated_file_path, letter_conversion, extracted_libraries, logger)
 
-        if stop_iteration:
+        vulnerability_gate = (bandit_issues == '' and
+                              dodgy_issues == 'No issues found.' and
+                              semgrep_issues == 'No issues found.')
+
+        # Run code quality scan
+        # other_issues = run_code_quality_scan(llm, mitigated_file_path, logger)
+
+        if vulnerability_gate:
             return code_block
 
 
@@ -1161,9 +1316,7 @@ def perform_scans(file_path, associated_letter_conversion, libraries, logger):
     else:
         logger.info(f"Issues found in semgrep scan: {bandit_scan_json_path}")
 
-    return_boolean = bandit_issues == '' and dodgy_issues == 'No issues found.' and semgrep_issues == 'No issues found.'
-
-    return return_boolean
+    return bandit_issues, dodgy_issues, semgrep_issues
 
 
 def save_code_to_file(code, path, logger):
@@ -1186,7 +1339,7 @@ def write_to_file(file_path, content):
         file.write(content)
 
 
-def create_chat_completion_llm(llm, messages, temperature=1.0, top_p=1.0, top_k=0, stream=False, stop=None):
+def create_chat_completion_llm(llm, messages, temperature=0.0, top_p=1.0, top_k=0, stream=False, stop=None):
     """
     Generates a chat completion using the specified language model (LLM) and parameters.
 
