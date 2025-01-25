@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tokenize
 import traceback
 from io import StringIO
@@ -22,6 +23,8 @@ from llama_cpp import Llama
 
 from typing import List, Tuple, Optional
 
+from mypy import api
+
 bandit_output_dir = "reports/bandit"
 os.makedirs(bandit_output_dir, exist_ok=True)
 
@@ -30,6 +33,9 @@ os.makedirs(dodgy_output_dir, exist_ok=True)
 
 semgrep_output_dir = "reports/semgrep"
 os.makedirs(semgrep_output_dir, exist_ok=True)
+
+mypy_output_dir = "reports/mypy"
+os.makedirs(mypy_output_dir, exist_ok=True)
 
 def setup_logger(log_suffix, letter_conversion, name):
     """
@@ -120,9 +126,11 @@ def prepend_to_file(file_path, content_to_prepend):
         existing_content = file.read()
 
     # Write the new content followed by the existing content
-    with open(file_path, 'w') as file:
-        file.write(content_to_prepend)
-        file.write(existing_content)
+    if content_to_prepend not in existing_content:
+        with open(file_path, 'w') as file:
+            file.write(content_to_prepend)
+            file.write(existing_content)
+
 
 def rename_file(current_file_name, new_file_name):
     """
@@ -140,6 +148,7 @@ def rename_file(current_file_name, new_file_name):
         print("You do not have the necessary permissions to rename this file.")
     except Exception as e:
         print(f"An error occurred: {e}")
+
 
 def is_python_file(file_path):
     # Check if the file has a .py extension
@@ -787,6 +796,104 @@ def get_semgrep_issues(input_semgrep_file):
         return f"An error occurred while reading Semgrep issues: {e}"
 
 
+def analyze_file_with_mypy(file_path: str, letter_conversion: str, logger: logging.Logger) -> Optional[str]:
+    """
+    Analyzes a Python file using mypy and saves a standardized report in JSON format.
+
+    Args:
+        file_path (str): Path to the Python file to analyze.
+        letter_conversion (str): Conversion of integer to Excel-style column name.
+        logger (logging.Logger): Logger object for logging information and errors.
+
+    Returns:
+        Optional[str]: Path to the standardized mypy report file, or None if analysis failed.
+    """
+    base_name = os.path.basename(file_path)
+    name, _ = os.path.splitext(base_name)
+
+    try:
+        # Define the output file path for the mypy JSON report
+        mypy_output_file = os.path.join(mypy_output_dir, name, letter_conversion, f"mypy.json")
+
+        # Create custom directory
+        os.makedirs(os.path.dirname(mypy_output_file), exist_ok=True)
+
+        # Run mypy on the given file
+        mypy_result = api.run([file_path])
+
+        # Parse mypy output
+        stdout, stderr, exit_code = mypy_result
+        if exit_code != 0 and not stdout:
+            logger.error(f"Mypy analysis failed for {file_path} with errors: {stderr}")
+            return None
+
+        findings = []
+
+        # Process stdout line by line
+        for line in stdout.splitlines():
+            if ":" in line:
+                # Split into 3 parts: file, line, and message
+                parts = line.split(":", 2)  # Split at most into 3 parts
+                if len(parts) == 3:
+                    file, line_num, message = parts
+                    try:
+                        finding = {
+                            "file": file.strip(),
+                            "line": int(line_num.strip()),  # Convert line number to int
+                            "message": message.strip(),  # Capture the full error message
+                        }
+                        findings.append(finding)
+                    except ValueError as e:
+                        logger.error(f"Error parsing line: {line}. Exception: {e}")
+
+        # Write findings to JSON file
+        with open(mypy_output_file, "w") as report_file:
+            json.dump(findings, report_file, indent=4)
+
+        logger.info(f"Mypy report saved to: {mypy_output_file}")
+        return mypy_output_file
+
+    except Exception as e:
+        logger.error(f"An error occurred during mypy analysis for {file_path}: {e}")
+        return None
+
+
+def get_mypy_issues(input_mypy_file: str) -> str:
+    """
+    Reads a Mypy JSON report and formats the issues into a user-friendly string.
+
+    Args:
+        input_mypy_file (str): Path to the Mypy JSON report file.
+
+    Returns:
+        str: A formatted string of Mypy issues.
+    """
+    try:
+        # Open and read the JSON file
+        with open(input_mypy_file, 'r') as file:
+            data = json.load(file)
+
+        # Extract issues from the JSON data
+        mypy_issues = []
+        for result in data:
+            file_path = result.get('file', 'N/A')
+            line = result.get('line', 'N/A')
+            message = result.get('message', 'N/A')
+
+            # Create a formatted issue string
+            issue_str = (
+                f"File: {file_path}\n"
+                f"  Line: {line}\n"
+                f"  Message: {message}\n"
+            )
+            mypy_issues.append(issue_str)
+
+        # Join all issues into a single formatted string
+        return "\n".join(mypy_issues) if mypy_issues else "No issues found."
+    except Exception as e:
+        return f"An error occurred while reading Mypy issues: {e}"
+
+
 def get_block_count_keys(input_model_path, input_logger):
     """
     Extracts metadata keys containing 'block_count' from a GGUF model file.
@@ -847,6 +954,7 @@ def validate_bandit_allowance(value):
         raise argparse.ArgumentTypeError(f"Invalid value '{value}'. bandit_allowance must be a positive integer.")
     return ivalue
 
+
 def validate_correction_limit(value):
     """
     Validates that the provided bandit_allowance is a positive integer.
@@ -867,6 +975,7 @@ def validate_correction_limit(value):
     except ValueError:
         raise argparse.ArgumentTypeError(f"Invalid value '{value}'. bandit_allowance must be a positive integer.")
     return ivalue
+
 
 def extract_module_names(text):
     """
@@ -989,6 +1098,7 @@ def remove_comments_and_docstrings(source):
 
     return ''.join(output)
 
+
 def run_code_quality_scan(llm, input_file_path, logger):
     logger.info(f"Running customized static code quality scan on {input_file_path}.")
 
@@ -1050,6 +1160,7 @@ def run_code_quality_scan(llm, input_file_path, logger):
 
     return parsed_issues_string
 
+
 def run_mitigation_loop(
         bandit_allowance,
         base_name,
@@ -1084,9 +1195,6 @@ def run_mitigation_loop(
     mitigated_file_path = os.path.join(mitigated_folder, mitigated_file_name)
     save_code_to_file(original_code, mitigated_file_path, logger)
 
-    # Set code quality issues to empty list
-    other_issues = []
-
     # Perform Vulnerability Scans
     # Static Code Analysis
     # Bandit is a static analysis tool designed to deeply inspect Python code for security issues.
@@ -1109,6 +1217,10 @@ def run_mitigation_loop(
     # It offers customizable rules and supports taint analysis to track untrusted data through your codebase.
     semgrep_scan_json_path = analyze_file_with_semgrep(mitigated_file_path, letter_conversion, extracted_libraries, logger)
     semgrep_issues = get_semgrep_issues(semgrep_scan_json_path)
+
+    # Initialize mypy with no issues string
+    # Do not want to scan the file that is going to potentially change from other scans
+    mypy_issues = "No issues found."
 
     # Dependencies Scans
     # Safety
@@ -1138,11 +1250,6 @@ def run_mitigation_loop(
         except IOError as e:
             logger.error(f"An error occurred while reading the file '{mitigated_file_path}': {e}")
             exit(1)
-
-        # Define the system and user prompts
-        system_prompt = (
-            "You are an AI programming assistant specializing in secure coding practices."
-        )
 
         # Calculate increments per iteration
         line_count_increment = initial_line_count * 0.5 / bandit_allowance
@@ -1185,54 +1292,78 @@ def run_mitigation_loop(
                                   f" in the provided Python code:\n{semgrep_issues}\n\n") \
             if semgrep_issues != "No issues found." else ""
 
-        other_issues_section = f"Address these other issues as well:\n{other_issues}\n\n" \
-            if len(other_issues) != 0 else ""
+        mypy_issues_section = (f"Mypy has identified the following issues"
+                                  f" in the provided Python code:\n{mypy_issues}\n\n") \
+            if mypy_issues != "No issues found." else ""
 
-        code_prompt = (
-            f"**Adhere to Best Security Practices:**\n\n"
-            f"{bandit_issues_section}"
-            f"{dodgy_issues_section}"
-            f"{semgrep_issues_section}"
-            f"{other_issues_section}"            
-            f"**Never hard code credentials, keys, or sensitive data.** Retrieve them securely from environment variables, "
-            f"configuration files, or external services. Avoid embedding sensitive data directly in code. When automating with "
-            f"tools like SSH, pass sensitive data through environment variables (e.g., using 'sshpass --env' for passwords) to "
-            f"prevent exposure in command-line arguments. Ensure temporary sensitive data is cleared from memory or the environment "
-            f"immediately after use. Avoid using variable names containing 'password' or similar terms for storing sensitive data.\n\n"
+        # Define the system and user prompts
+        system_prompt = (
+            "You are an AI programming assistant specializing in secure coding practices."
+        )
 
-            f"**Define Method Signatures:**\n\n"
-            f"- Use explicit type annotations for all parameters and return values; ensure that both parameter types and return types are specified for every function and method.\n"
-            f"- Employ clear and descriptive parameter names.\n"
-            f"- Specify specific non-vague types; avoid `object` and `None` as a return types.\n"
-            f"- Include any relevant constraints or modifiers.\n\n"
-
-            f"**Ensure Exception Handling:**\n\n"
-            f"- Propagate original exceptions/errors to maintain traceback information; avoid re-raising exceptions as different types.\n"
-            f"- **Avoid using print statements or logging within exception/error blocks.**\n"
-            f"- **Never return `None`;** instead, raise appropriate exceptions or provide meaningful return values.\n"
-            f"- Handle unexpected input types by:\n"
-            f"  - Validating input types at the function's start.\n"
-            f"  - Raising a `TypeError` for inappropriate argument types.\n"
-            f"  - Raising a `ValueError` for arguments with correct types but inappropriate values.\n"
-            f"  - Providing clear, informative error messages to facilitate debugging.\n\n"
-
-            f"**Ensure Accurate Docstrings:**\n\n"
-            f"- Clearly describe the function's purpose, parameters, return types, and exceptions raised.\n"
-            f"- Follow standard conventions for clarity and consistency.\n\n"
-
-            f"{substitution_code_instruction}\n\n"
+        user_prompt = (
+            f"""
+            **Adhere to Best Security Practices:**
+            {bandit_issues_section}
+            {dodgy_issues_section}
+            {semgrep_issues_section}
             
-            f"Ensure the code does not exceed {word_count} words or {line_count} lines.\n\n"
+            **Adhere to These Linter Findings:**
+            {mypy_issues_section}      
+
+            {substitution_code_instruction}
+
+            **Ensure the code does not exceed {word_count} words or {line_count} lines.**
+
+            **Only perform a one for one replacement for the method provided, do not write additional methods."**
+                  
+            **Include only the code with appropriate docstrings and inline comments.**
+
+            **Never hard code credentials, keys, or sensitive data.** Retrieve them securely from environment variables,
+            configuration files, or external services. Avoid embedding sensitive data directly in code. When automating 
+            with tools like SSH, pass sensitive data through environment variables (e.g., using 'sshpass --env' for 
+            passwords) to prevent exposure in command-line arguments. Ensure temporary sensitive data is cleared from 
+            memory or the environment immediately after use. Avoid using variable names containing 'password' or similar
+             terms for storing sensitive data.
+
+            **Define Method Signatures:**
+            - Use explicit type annotations for all parameters and return values; ensure that both parameter types and 
+                return types are specified for every function and method.
+            - Employ clear and descriptive parameter names.
+            - Specify specific non-vague types; avoid `object` and `None` as a return types.
+            - Include any relevant constraints or modifiers.
             
-            f"Include only the code with appropriate docstrings and inline comments.\n\n"
+            **Ensure Exception Handling:**
+            - Propagate original exceptions/errors to maintain traceback information; avoid re-raising exceptions as 
+                different types.
+            - **Avoid using print statements or logging within exception/error blocks.**
+            - **Never return `None`;** instead, raise appropriate exceptions or provide meaningful return values.
+            - Handle unexpected input types by:
+              - Validating input types at the function's start.
+              - Raising a `TypeError` for inappropriate argument types.
+              - Raising a `ValueError` for arguments with correct types but inappropriate values.
+              - Providing clear, informative error messages to facilitate debugging.\
+
+            **Ensure Accurate Docstrings:**
+            - Clearly describe the function's purpose, parameters, return types, and exceptions raised.
+            - Follow standard conventions for clarity and consistency.
+                                  
+            **Ensure adequate logging is implemented.**
             
-            f"Ensure adequate logging is implemented.\n\n"
-            f"```python\n{mitigated_code}\n```"
+            **Ensure a main method is implemented for standalone running capability:**
+            - The `main` method should initialize and orchestrate the execution of the program's functionality.
+            - Include appropriate logging within the `main` method to track execution and identify issues.
+            - Ensure the `main` method is invoked when the script is executed directly.
+            
+            ```python
+            {mitigated_code}
+            ```
+            """
         )
 
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": code_prompt}
+            {"role": "user", "content": user_prompt}
         ]
 
         # Adjust temperature to control randomness; increase to make output more diverse
@@ -1269,20 +1400,228 @@ def run_mitigation_loop(
             logger.warning("No adjusted code block found in the secure code suggestion. Stopping to diagnose issue.")
             break
 
-        # Perform vulnerability scans again
-        (bandit_issues,
-         dodgy_issues,
-         semgrep_issues) = perform_scans(mitigated_file_path, letter_conversion, extracted_libraries, logger)
+        # Perform vulnerability/linter scans on mitigated file
+        (
+            bandit_issues,
+            dodgy_issues,
+            semgrep_issues,
+            mypy_issues
+        ) = perform_scans(mitigated_file_path, letter_conversion, extracted_libraries, logger)
 
         vulnerability_gate = (bandit_issues == '' and
                               dodgy_issues == 'No issues found.' and
-                              semgrep_issues == 'No issues found.')
-
-        # Run code quality scan
-        # other_issues = run_code_quality_scan(llm, mitigated_file_path, logger)
+                              semgrep_issues == 'No issues found.' and
+                              mypy_issues == 'No issues found.')
 
         if vulnerability_gate:
             return code_block
+
+
+def run_method_unit_test_creation_loop(
+        correction_limit,
+        base_name,
+        llm,
+        logger,
+        generated_unit_test_dir,
+        file_base_name,
+        letter_conversion,
+        original_code,
+        method,
+        import_string):
+
+    # Define the system and user prompts
+    system_prompt = (
+        "You are an AI assistant that generates Python unit tests using the pytest framework."
+    )
+
+    code_prompt = (
+        f"""
+        Generate a single functional unit test method for the specified code, strictly adhering to the following essential rules:
+
+        - **Single Test Case**: Generate only one test method focused on a specific functionality or scenario. Do not include multiple test methods or unrelated code.
+        - **Clarity and Purpose**: Use a clear and descriptive test case name that indicates the functionality being tested.
+        - **Isolation**: Ensure the test is atomic, independent of other tests, and avoids relying on shared state or resources.
+        - **Setup and Teardown**: Include setup and cleanup methods if necessary to initialize and dispose of resources (e.g., databases, mock objects).
+        - **Test Coverage**: Address a typical scenario or an edge case relevant to the functionality.
+        - **Assertions**: Use meaningful and precise assertions to validate the expected outcome against the actual result.
+        - **Mocking and Dependency Isolation**: Mock external dependencies (e.g., APIs, services) to isolate the code under test and avoid external failures.
+        - **Readability**: Add a descriptive docstring and inline comments to explain the purpose and behavior of the test.
+        - **Performance**: Ensure the test executes efficiently and avoids unnecessary delays.
+        - **Logging**: Include adequate logging to trace test execution and aid in debugging.
+
+        Based on the above rules, generate a single test method for the following code:
+
+        ```python
+        {original_code}
+        ```
+
+        **Include only the single test method, with appropriate docstrings and inline comments for clarity.**
+        """
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": code_prompt}
+    ]
+
+    # Create chat completion llama object
+    functional_unit_test_code_response = create_chat_completion_llm(
+        llm,
+        messages,
+        0.0,
+        1,
+        0,
+        True,
+        ["<|endoftext|>"]
+    )
+
+    # Process the streamed response
+    functional_unit_test_code_block = process_streamed_output(functional_unit_test_code_response)
+    logger.info("Secure code generation completed.")
+
+    # Extract the code block from the secure code suggestion
+    functional_unit_test_code_block = extract_code_block(functional_unit_test_code_block)
+
+    iteration = 0
+
+    if functional_unit_test_code_block:
+        name, ext = os.path.splitext(base_name)
+        unit_test_file_name = f"{file_base_name}_iteration_{method}_{iteration}{ext}"
+        unit_test_file_path = os.path.join(generated_unit_test_dir, letter_conversion, unit_test_file_name)
+        logger.info(f"Applied autoimport to {unit_test_file_path}; imports have been updated.")
+        fixed_code = autoimport.fix_code(functional_unit_test_code_block)
+        fixed_code = re.sub(r"^from your_module import .*", "", fixed_code, flags=re.MULTILINE)
+        logger.info(f"Saving code to file {unit_test_file_path}.")
+        save_code_to_file(fixed_code, unit_test_file_path, logger)
+
+        # Prepend the generated import statements again if necessary
+        prepend_to_file(unit_test_file_path, import_string + "\n")
+
+    else:
+        logger.warning("No adjusted code block found in the secure code suggestion. Stopping to diagnose issue.")
+        sys.exit(1)
+
+    # Set initial and maximum temperature values
+    initial_temperature = 0.0
+    max_temperature = 2.0
+
+    # Calculate increment per iteration
+    temperature_increment = (max_temperature - initial_temperature) / correction_limit
+
+    # Define initial constraints based on the current mitigated code
+    initial_line_count = len(fixed_code.split("\n"))
+    initial_word_count = len(fixed_code.split())
+
+    # Begin loop here
+    while iteration < correction_limit:
+        iteration += 1
+
+        logger.info(f"Testing file {unit_test_file_path}.")
+        stdout, stderr = execute_unit_test_file(unit_test_file_path)
+
+        # Check if there are any errors in the test execution
+        if "FAIL" not in stdout.upper() and "ERROR" not in stdout.upper() and "ERROR" not in stderr.upper():
+            logger.info(f"All tests passed successfully for {unit_test_file_path}.")
+            return functional_unit_test_code_block
+
+        logger.warning("Errors detected in the unit tests. Attempting to correct...")
+
+        # Adjust temperature to control randomness; increase to make output more diverse
+        temperature = round(min(max_temperature, initial_temperature + temperature_increment * iteration), 2)
+
+        # Calculate increments per iteration
+        line_count_increment = initial_line_count * 0.5 / correction_limit
+        word_count_increment = initial_word_count * 0.5 / correction_limit
+
+        # Adjust constraints dynamically based on the current iteration
+        line_count = int(initial_line_count * 1.1 + line_count_increment * iteration)
+        word_count = int(initial_word_count * 1.2 + word_count_increment * iteration)
+
+        # Combine stdout and stderr for error analysis
+        error_output = f"Standard Output:\n{stdout}\n\nStandard Error Output:\n{stderr}."
+
+        error_summary_system_prompt = (
+            f""" 
+            Analyze the given unit test and its failure details to identify the underlying issues causing the test failure. 
+            Focus on accurately diagnosing the root cause and ensuring the resolution aligns with best practices. The analysis 
+            and recommendations should adhere to the following guidelines:
+
+            1. **Summarize the Failure**: Clearly describe the test's purpose, the error or failure message, and the behavior 
+                observed during execution.
+            2. **Identify the Root Cause**: Use the error details, logs, and code context to pinpoint the exact reason for the 
+                failure. If external dependencies (e.g., APIs, databases) are involved, identify potential misconfigurations 
+                or integration issues.
+            3. **Provide Actionable Fixes**:
+                - Clearly specify how to fix the identified issues within the failing test.
+                - If the root cause lies in the code under test, recommend changes to that code, but DO NOT modify the test's 
+                    primary purpose.
+                - Address best practices for test design, including mocking, assertions, and resource management, where applicable.
+            4. **Generate the Corrected Test Method**: After diagnosing the issue and determining the fix, produce a corrected 
+                version of the failing unit test method. Ensure the corrected test:
+                - Accurately validates the intended functionality.
+                - Passes successfully once the corrections are applied.
+                - Maintains readability, atomicity, and proper resource handling.
+                - Adheres to the existing test's primary purpose.
+                - Is enclosed within a code block formatted as ` ```python ... ``` ` to ensure it is parseable.
+            5. **Clarity and Precision**: Avoid ambiguous suggestions. Provide detailed and practical steps to implement the fix.
+
+            Ensure the response is concise, actionable, and strictly aligned with these guidelines. Include the fixed single 
+            method unit test at the end of your analysis, enclosed in ` ```python ... ``` ` for proper parsing.
+            """
+        )
+
+        error_summary_user_prompt = (
+            f"""
+            The following is the stdout and stderr generated by the Python unit tests. Analyze the output to identify the root 
+            cause of the failure and fix the provided test. Ensure that the fixed test adheres to the best practices outlined 
+            in the system prompt and is functional.
+
+            Error Output:
+            {error_output}
+
+            Provide the fixed single method unit test enclosed within a ` ```python ... ``` ` block for proper parsing.
+            
+            Ensure the code does not exceed {word_count} words or {line_count} lines.
+            """
+        )
+
+        error_summary_messages = [
+            {"role": "system", "content": error_summary_system_prompt},
+            {"role": "user", "content": error_summary_user_prompt}
+        ]
+
+        # Use the LLM to fix the errors
+        error_correction_llm_config = create_chat_completion_llm(
+            llm,
+            messages=error_summary_messages,
+            temperature=temperature,  # Deterministic output
+            top_p=1,  # Use nucleus sampling
+            top_k=0,  # Disable top-k sampling
+            stream=True,  # Enable streaming of the response
+            stop=["<|endoftext|>"]  # Define stopping criteria
+        )
+
+        # Process the streamed output to obtain the corrected code
+        error_correction_response = process_streamed_output(error_correction_llm_config)
+
+        # Extract the corrected code block from the LLM response
+        corrected_unit_test_code = extract_code_block(error_correction_response)
+
+        # Use autoimport to fix any lingering import statements
+        corrected_unit_test_code = autoimport.fix_code(corrected_unit_test_code)
+
+        # Define filename and path for the final output file
+        unit_test_file_name = f"{base_name}_unit_test_{iteration}{ext}"
+        unit_test_file_path = os.path.join(generated_unit_test_dir, name, letter_conversion,
+                                           unit_test_file_name)
+
+        # Save the corrected code back to the unit test file
+        write_to_file(unit_test_file_path, corrected_unit_test_code)
+
+        # Prepend the generated import statements again if necessary
+        prepend_to_file(unit_test_file_path, import_string + "\n")
+
+        logger.info(f"Unable to mitigate unit test for file {base_name}.")
 
 
 def perform_scans(file_path, associated_letter_conversion, libraries, logger):
@@ -1305,7 +1644,7 @@ def perform_scans(file_path, associated_letter_conversion, libraries, logger):
     if dodgy_issues == 'No issues found.':
         logger.info("No issues encountered after dodgy scan.")
     else:
-        logger.info(f"Issues found in dodgy scan: {bandit_scan_json_path}")
+        logger.info(f"Issues found in dodgy scan: {dodgy_scan_json_path}")
 
     # Semgrep
     semgrep_scan_json_path = analyze_file_with_semgrep(file_path, associated_letter_conversion, libraries, logger)
@@ -1314,9 +1653,18 @@ def perform_scans(file_path, associated_letter_conversion, libraries, logger):
     if semgrep_issues == 'No issues found.':
         logger.info("No issues encountered after semgrep scan.")
     else:
-        logger.info(f"Issues found in semgrep scan: {bandit_scan_json_path}")
+        logger.info(f"Issues found in semgrep scan: {semgrep_scan_json_path}")
 
-    return bandit_issues, dodgy_issues, semgrep_issues
+    # Mypy
+    mypy_scan_json_path = analyze_file_with_mypy(file_path, associated_letter_conversion, logger)
+    mypy_issues = get_mypy_issues(mypy_scan_json_path)
+
+    if mypy_issues == 'No issues found.':
+        logger.info("No issues encountered after mypy scan.")
+    else:
+        logger.info(f"Issues found in mypy scan: {mypy_scan_json_path}")
+
+    return bandit_issues, dodgy_issues, semgrep_issues, mypy_issues
 
 
 def save_code_to_file(code, path, logger):

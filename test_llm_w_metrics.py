@@ -29,10 +29,10 @@ if __name__ == "__main__":
     rocml.smi_initialize()
 
     # Set the model path
-    model_path = 'models/llama-3.2-3b-instruct-q8_0.gguf'
+    model_path = 'models/deepseek-coder-6.7b-instruct.Q5_K_M.gguf'
 
     # Initialize the logger
-    logger = setup_logger(f"test_llm_{os.path.basename(model_path)}")
+    logger = setup_logger(f"test_llm_{os.path.basename(model_path)}", "ZZ", "deep_seek")
 
     # Get the total layers from the input model
     total_layers = get_block_count_keys(model_path, logger)
