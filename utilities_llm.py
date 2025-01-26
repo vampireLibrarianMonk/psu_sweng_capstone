@@ -838,7 +838,6 @@ def analyze_file_with_mypy(file_path: str, letter_conversion: str, logger: loggi
                     file, line_num, message = parts
                     try:
                         finding = {
-                            "file": file.strip(),
                             "line": int(line_num.strip()),  # Convert line number to int
                             "message": message.strip(),  # Capture the full error message
                         }
@@ -876,15 +875,13 @@ def get_mypy_issues(input_mypy_file: str) -> str:
         # Extract issues from the JSON data
         mypy_issues = []
         for result in data:
-            file_path = result.get('file', 'N/A')
             line = result.get('line', 'N/A')
             message = result.get('message', 'N/A')
 
             # Create a formatted issue string
             issue_str = (
-                f"File: {file_path}\n"
-                f"  Line: {line}\n"
-                f"  Message: {message}\n"
+                f"Line: {line}\n"
+                f"\tMessage: {message}\n"
             )
             mypy_issues.append(issue_str)
 
@@ -933,9 +930,9 @@ def get_block_count_keys(input_model_path, input_logger):
         raise Exception(f"Returning the keys found: {matching_keys}.")
 
 
-def validate_bandit_allowance(value):
+def validate_iteration_allowance(value):
     """
-    Validates that the provided bandit_allowance is a positive integer.
+    Validates that the provided iteration_allowance is a positive integer.
 
     Args:
         value (str): The input value to validate.
@@ -951,13 +948,13 @@ def validate_bandit_allowance(value):
         if ivalue <= 0:
             raise ValueError
     except ValueError:
-        raise argparse.ArgumentTypeError(f"Invalid value '{value}'. bandit_allowance must be a positive integer.")
+        raise argparse.ArgumentTypeError(f"Invalid value '{value}'. iteration_allowance must be a positive integer.")
     return ivalue
 
 
 def validate_correction_limit(value):
     """
-    Validates that the provided bandit_allowance is a positive integer.
+    Validates that the provided iteration_allowance is a positive integer.
 
     Args:
         value (str): The input value to validate.
@@ -1162,7 +1159,7 @@ def run_code_quality_scan(llm, input_file_path, logger):
 
 
 def run_mitigation_loop(
-        bandit_allowance,
+        iteration_allowance,
         base_name,
         llm,
         logger,
@@ -1177,7 +1174,7 @@ def run_mitigation_loop(
     max_temperature = 2.0
 
     # Calculate increment per iteration
-    temperature_increment = (max_temperature - initial_temperature) / bandit_allowance
+    temperature_increment = (max_temperature - initial_temperature) / iteration_allowance
 
     # Define initial constraints based on the current mitigated code
     initial_line_count = len(original_code.split("\n"))
@@ -1233,8 +1230,8 @@ def run_mitigation_loop(
     #  A static analysis tool designed to detect security vulnerabilities in Python code by tracking the flow of tainted
     #  (untrusted) data to sensitive functions. It helps identify potential injection points and data leaks.
 
-    logger.info(f"Running an iteration series of {bandit_allowance}.")
-    while iteration < bandit_allowance:
+    logger.info(f"Running an iteration series of {iteration_allowance}.")
+    while iteration < iteration_allowance:
         logger.info(f"{'-' * 35} Running iteration {iteration} {'-' * 35}")
 
         # Read the specified file
@@ -1252,8 +1249,8 @@ def run_mitigation_loop(
             exit(1)
 
         # Calculate increments per iteration
-        line_count_increment = initial_line_count * 0.5 / bandit_allowance
-        word_count_increment = initial_word_count * 0.5 / bandit_allowance
+        line_count_increment = initial_line_count * 0.5 / iteration_allowance
+        word_count_increment = initial_word_count * 0.5 / iteration_allowance
 
         # Adjust constraints dynamically based on the current iteration
         line_count = int(initial_line_count * 1.1 + line_count_increment * iteration)
@@ -1325,15 +1322,21 @@ def run_mitigation_loop(
             passwords) to prevent exposure in command-line arguments. Ensure temporary sensitive data is cleared from 
             memory or the environment immediately after use. Avoid using variable names containing 'password' or similar
              terms for storing sensitive data.
+             
+            **Ensure that all environment variables are checked after loading.** 
 
             **Define Method Signatures:**
             - Use explicit type annotations for all parameters and return values; ensure that both parameter types and 
-                return types are specified for every function and method.
+              return types are specified for every function and method.
             - Employ clear and descriptive parameter names.
-            - Specify specific non-vague types; avoid `object` and `None` as a return types.
+            - Specify specific non-vague types; avoid `object` and `None` as return types.
             - Include any relevant constraints or modifiers.
+            - Ensure that default values in method signatures match the expected type to avoid type mismatches and improve 
+              type safety.
             
             **Ensure Exception Handling:**
+            - Always ensure that `raise` statements are nested within structured exception blocks, such as 
+                `try...except`.
             - Propagate original exceptions/errors to maintain traceback information; avoid re-raising exceptions as 
                 different types.
             - **Avoid using print statements or logging within exception/error blocks.**
@@ -1342,7 +1345,7 @@ def run_mitigation_loop(
               - Validating input types at the function's start.
               - Raising a `TypeError` for inappropriate argument types.
               - Raising a `ValueError` for arguments with correct types but inappropriate values.
-              - Providing clear, informative error messages to facilitate debugging.\
+              - Providing clear, informative error messages to facilitate debugging.
 
             **Ensure Accurate Docstrings:**
             - Clearly describe the function's purpose, parameters, return types, and exceptions raised.
@@ -1401,12 +1404,13 @@ def run_mitigation_loop(
             break
 
         # Perform vulnerability/linter scans on mitigated file
-        (
-            bandit_issues,
-            dodgy_issues,
-            semgrep_issues,
-            mypy_issues
-        ) = perform_scans(mitigated_file_path, letter_conversion, extracted_libraries, logger)
+        # Perform vulnerability scans again
+        (bandit_issues, dodgy_issues, semgrep_issues, mypy_issues) = perform_scans(
+            mitigated_file_path,
+            letter_conversion,
+            extracted_libraries,
+            logger
+        )
 
         vulnerability_gate = (bandit_issues == '' and
                               dodgy_issues == 'No issues found.' and
