@@ -9,6 +9,7 @@ import sys
 import tokenize
 import traceback
 from io import StringIO
+from typing import List, Tuple, Optional
 
 import autoimport
 import autopep8
@@ -20,10 +21,8 @@ from bandit.formatters.text import get_metrics
 from dodgy.checks import check_file_contents
 from gguf_parser import GGUFParser
 from llama_cpp import Llama
-
-from typing import List, Tuple, Optional
-
 from mypy import api
+from vulture import Vulture
 
 bandit_output_dir = "reports/bandit"
 os.makedirs(bandit_output_dir, exist_ok=True)
@@ -36,6 +35,10 @@ os.makedirs(semgrep_output_dir, exist_ok=True)
 
 mypy_output_dir = "reports/mypy"
 os.makedirs(mypy_output_dir, exist_ok=True)
+
+vulture_output_dir = "reports/vulture"
+os.makedirs(vulture_output_dir, exist_ok=True)
+
 
 def setup_logger(log_suffix, letter_conversion, name):
     """
@@ -819,7 +822,7 @@ def analyze_file_with_mypy(file_path: str, letter_conversion: str, logger: loggi
         os.makedirs(os.path.dirname(mypy_output_file), exist_ok=True)
 
         # Run mypy on the given file
-        mypy_result = api.run([file_path])
+        mypy_result = api.run([file_path, "--warn-unused-ignores"])
 
         # Parse mypy output
         stdout, stderr, exit_code = mypy_result
@@ -889,6 +892,93 @@ def get_mypy_issues(input_mypy_file: str) -> str:
         return "\n".join(mypy_issues) if mypy_issues else "No issues found."
     except Exception as e:
         return f"An error occurred while reading Mypy issues: {e}"
+
+
+def analyze_file_with_vulture(file_path: str, letter_conversion: str, logger: logging.Logger) -> Optional[str]:
+    """
+    Analyzes a Python file using Vulture and saves a standardized report in JSON format.
+
+    Args:
+        file_path (str): Path to the Python file to analyze.
+        letter_conversion (str): Conversion of integer to Excel-style column name.
+        logger (logging.Logger): Logger object for logging information and errors.
+
+    Returns:
+        Optional[str]: Path to the standardized Vulture report file, or None if analysis failed.
+    """
+    base_name = os.path.basename(file_path)
+    name, _ = os.path.splitext(base_name)
+
+    try:
+        # Define the output file path for the Vulture JSON report
+        vulture_output_file = os.path.join(vulture_output_dir, name, letter_conversion, "vulture.json")
+
+        # Create the directory structure for the output file
+        os.makedirs(os.path.dirname(vulture_output_file), exist_ok=True)
+
+        # Initialize Vulture
+        vulture_analyzer = Vulture()
+
+        # Read the file content and scan it
+        with open(file_path, 'r') as file:
+            source_code = file.read()
+        vulture_analyzer.scan(source_code)
+
+        # Collect unused code results
+        unused_code = vulture_analyzer.get_unused_code()
+
+        findings = []
+        for item in unused_code:
+            findings.append({
+                "type": item.typ.capitalize(),  # Type of unused code (e.g., "Function", "Variable")
+                "name": item.name,  # Name of the unused entity
+            })
+
+        # Write findings to a JSON file
+        with open(vulture_output_file, "w") as report_file:
+            json.dump(findings, report_file, indent=4)
+
+        logger.info(f"Vulture report saved to: {vulture_output_file}")
+        return vulture_output_file
+
+    except Exception as e:
+        logger.error(f"An error occurred during Vulture analysis for {file_path}: {e}")
+        return None
+
+
+def get_vulture_issues(input_vulture_file: str) -> str:
+    """
+    Reads a Vulture JSON report and formats the issues into a user-friendly string.
+
+    Args:
+        input_vulture_file (str): Path to the Vulture JSON report file.
+
+    Returns:
+        str: A formatted string of Vulture issues.
+    """
+    try:
+        # Open and read the JSON file
+        with open(input_vulture_file, 'r') as file:
+            data = json.load(file)
+
+        # Extract issues from the JSON data
+        vulture_issues = []
+        for result in data:
+            issue_type = result.get('type', 'Unknown')
+            name = result.get('name', 'N/A')
+            line_start = result.get('line_start', 'N/A')  # Updated to reflect new key
+            line_end = result.get('line_end', 'N/A')  # Updated to reflect new key
+
+            # Create a formatted issue string
+            issue_str = (
+                f"\t\t\tType: {issue_type} --> Name: {name}\n"
+            )
+            vulture_issues.append(issue_str)
+
+        # Join all issues into a single formatted string
+        return "\n".join(vulture_issues) if vulture_issues else "No unused code found."
+    except Exception as e:
+        return f"An error occurred while reading Vulture issues: {e}"
 
 
 def get_block_count_keys(input_model_path, input_logger):
@@ -1168,7 +1258,6 @@ def run_mitigation_loop(
         letter_conversion,
         original_code,
         section):
-
     # Set initial and maximum temperature values
     initial_temperature = 0.0
     max_temperature = 2.0
@@ -1212,12 +1301,17 @@ def run_mitigation_loop(
 
     # A lightweight static analysis tool that scans code for security vulnerabilities and enforces coding standards.
     # It offers customizable rules and supports taint analysis to track untrusted data through your codebase.
-    semgrep_scan_json_path = analyze_file_with_semgrep(mitigated_file_path, letter_conversion, extracted_libraries, logger)
+    semgrep_scan_json_path = analyze_file_with_semgrep(mitigated_file_path, letter_conversion, extracted_libraries,
+                                                       logger)
     semgrep_issues = get_semgrep_issues(semgrep_scan_json_path)
 
-    # Initialize mypy with no issues string
+    # Initialize mypy issues with no issues string
     # Do not want to scan the file that is going to potentially change from other scans
     mypy_issues = "No issues found."
+
+    # Initialize vulture issues with no issues string
+    # Do not want to scan the file that is going to potentially change from other scans
+    vulture_issues = "No unused code found."
 
     # Dependencies Scans
     # Safety
@@ -1290,8 +1384,11 @@ def run_mitigation_loop(
             if semgrep_issues != "No issues found." else ""
 
         mypy_issues_section = (f"Mypy has identified the following issues"
-                                  f" in the provided Python code:\n{mypy_issues}\n\n") \
+                               f" in the provided Python code:\n{mypy_issues}\n\n") \
             if mypy_issues != "No issues found." else ""
+
+        vulture_issues_section = f"**Address the Following Unused Code Findings:**:\n{vulture_issues}\n\n" \
+            if vulture_issues != "No unused code found." else ""
 
         # Define the system and user prompts
         system_prompt = (
@@ -1308,6 +1405,24 @@ def run_mitigation_loop(
             **Adhere to These Linter Findings:**
             {mypy_issues_section}      
 
+            **Address Unused Code:**
+            - Refactor or remove unused functions and variables flagged by static analysis tools like Vulture to improve
+                code maintainability and clarity:
+            - Ensure the identified unused code is either integrated into the logic where appropriate or removed 
+                entirely while preserving the script's intended functionality and maintaining code quality.
+            - For functions or variables removed, ensure any related references, comments, or documentation are also 
+                updated to maintain consistency.
+
+            {vulture_issues_section}  
+            
+            **Code Simplification:**
+            - Regularly analyze the codebase for unused functions, variables, or imports, and remove them to keep the 
+                code clean and efficient.
+            - Combine related error-handling logic into fewer, well-documented functions to avoid redundancy and improve
+                code reusability.
+            - Maintain a balance between readability and efficiency by ensuring the code remains concise, modular, and 
+                well-structured.
+
             {substitution_code_instruction}
 
             **Ensure the code does not exceed {word_count} words or {line_count} lines.**
@@ -1323,17 +1438,37 @@ def run_mitigation_loop(
             memory or the environment immediately after use. Avoid using variable names containing 'password' or similar
              terms for storing sensitive data.
              
-            **Ensure that all environment variables are checked after loading.** 
-
+            **Ensure that all environment variables are checked after loading to guarantee they are not None and match 
+                the expected data type.** 
+            - Use explicit type conversion (e.g., `int()`, `float()`, `str()`) to ensure the values conform to the 
+                required type and handle potential conversion errors gracefully. 
+            - When type conversion is performed, validate the converted value to ensure it meets functional 
+                requirements (e.g., range checks for numeric values). 
+            - If an environment variable is required but not set, log an appropriate error and terminate execution or 
+                provide a fallback value where applicable. 
+            
             **Define Method Signatures:**
             - Use explicit type annotations for all parameters and return values; ensure that both parameter types and 
-              return types are specified for every function and method.
+                return types are specified for every function and method.
             - Employ clear and descriptive parameter names.
-            - Specify specific non-vague types; avoid `object` and `None` as return types.
+            - Specify specific non-vague types; avoid `object` or invalid types such as `any`. Use `typing.Any` where 
+                generality is required.
             - Include any relevant constraints or modifiers.
-            - Ensure that default values in method signatures match the expected type to avoid type mismatches and improve 
-              type safety.
-            
+            - Ensure that default values in method signatures match the expected type to avoid type mismatches and 
+                improve type safety.
+            - If a function is intended to always return a specific type (e.g., `float` or `str`), provide appropriate 
+                fallback values in cases of exceptions or errors to maintain consistency in the return type. For 
+                instance, if `None` is not a valid return value, ensure that a default value (e.g., an empty string or 
+                0) is returned instead.
+            - When working with dynamically loaded values (e.g., from environment variables), account for their 
+            potential type variations and validate or convert them appropriately to prevent type-related issues.
+            - Avoid ambiguous return types that include optional values (`Optional[X]`) when the function is expected 
+                to always return a specific type. Instead, handle cases where the value might be `None` or invalid by either
+                raising an appropriate exception or substituting with a sensible default value.
+            - Ensure that error handling within methods does not result in incompatible or inconsistent return types. 
+                Always align return types with the function's type annotations to improve reliability and 
+                maintainability.
+
             **Ensure Exception Handling:**
             - Always ensure that `raise` statements are nested within structured exception blocks, such as 
                 `try...except`.
@@ -1405,7 +1540,7 @@ def run_mitigation_loop(
 
         # Perform vulnerability/linter scans on mitigated file
         # Perform vulnerability scans again
-        (bandit_issues, dodgy_issues, semgrep_issues, mypy_issues) = perform_scans(
+        (bandit_issues, dodgy_issues, semgrep_issues, mypy_issues, vulture_issues) = perform_scans(
             mitigated_file_path,
             letter_conversion,
             extracted_libraries,
@@ -1432,7 +1567,6 @@ def run_method_unit_test_creation_loop(
         original_code,
         method,
         import_string):
-
     # Define the system and user prompts
     system_prompt = (
         "You are an AI assistant that generates Python unit tests using the pytest framework."
@@ -1668,7 +1802,16 @@ def perform_scans(file_path, associated_letter_conversion, libraries, logger):
     else:
         logger.info(f"Issues found in mypy scan: {mypy_scan_json_path}")
 
-    return bandit_issues, dodgy_issues, semgrep_issues, mypy_issues
+    # vulture
+    vulture_scan_json_path = analyze_file_with_vulture(file_path, associated_letter_conversion, logger)
+    vulture_issues = get_vulture_issues(vulture_scan_json_path)
+
+    if vulture_issues == 'No unused code found.':
+        logger.info("No issues encountered after vulture scan.")
+    else:
+        logger.info(f"Issues found in vulture scan: {vulture_scan_json_path}")
+
+    return bandit_issues, dodgy_issues, semgrep_issues, mypy_issues, vulture_issues
 
 
 def save_code_to_file(code, path, logger):
@@ -1769,10 +1912,10 @@ def create_chat_completion_llm(llm, messages, temperature=0.0, top_p=1.0, top_k=
     chat_completion_llm = llm.create_chat_completion(
         messages=messages,
         temperature=temperature,  # Set temperature for deterministic output
-        top_p=top_p,              # Use nucleus sampling with top_p probability
-        top_k=top_k,              # Limit next token selection to top_k tokens
-        stream=stream,            # Enable or disable streaming of the response
-        stop=stop                 # Define stopping criteria for generation
+        top_p=top_p,  # Use nucleus sampling with top_p probability
+        top_k=top_k,  # Limit next token selection to top_k tokens
+        stream=stream,  # Enable or disable streaming of the response
+        stop=stop  # Define stopping criteria for generation
     )
 
     return chat_completion_llm
