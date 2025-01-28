@@ -1,0 +1,119 @@
+prompts:
+  - role: mitigation_system_prompt
+    content: |
+      You are an AI programming assistant specializing in secure coding practices.
+  - role: mitigation_user_prompt
+    content: |
+      **Address Unused Code:**
+      - Refactor or remove unused functions and variables flagged by static analysis tools like Vulture to improve
+          code maintainability and clarity:
+      - Ensure the identified unused code is either integrated into the logic where appropriate or removed 
+          entirely while preserving the script's intended functionality and maintaining code quality.
+      - For functions or variables removed, ensure any related references, comments, or documentation are also 
+          updated to maintain consistency.
+     
+      **Code Simplification:**
+      - Regularly analyze the codebase for unused functions, variables, or imports, and remove them to keep the 
+          code clean and efficient.
+      - Combine related error-handling logic into fewer, well-documented functions to avoid redundancy and improve
+          code reusability.
+      - Maintain a balance between readability and efficiency by ensuring the code remains concise, modular, and 
+          well-structured.
+
+      {substitution_code_instruction}
+
+      **Ensure the code does not exceed {word_count} words or {line_count} lines.**
+
+      **Only perform a one-for-one replacement for the method provided, do not write additional methods.**
+                
+      **Include only the code with appropriate docstrings and inline comments.**
+
+      **Never hard code credentials, keys, or sensitive data.** Retrieve them securely from environment variables,
+      configuration files, or external services. Avoid embedding sensitive data directly in code. When automating 
+      with tools like SSH, pass sensitive data through environment variables (e.g., using 'sshpass --env' for 
+      passwords) to prevent exposure in command-line arguments. Ensure temporary sensitive data is cleared from 
+      memory or the environment immediately after use. Avoid using variable names containing 'password' or similar
+      terms for storing sensitive data.
+       
+      **Ensure that all environment variables are checked after loading to guarantee they are not None and match the 
+      expected data type.**
+      - Use explicit type conversion (e.g., `int()`, `float()`, `str()`) to ensure the values conform to the required 
+      type and handle potential conversion errors gracefully. 
+      - When type conversion is performed, validate the converted value to ensure it meets functional requirements 
+      (e.g., range checks for numeric values). 
+      - If an environment variable is required but not set, log an appropriate error and terminate execution or provide
+      a fallback value where applicable. 
+
+      **Define Method Signatures:**
+      - Use explicit type annotations for all parameters and return values; ensure that both parameter types and 
+          return types are specified for every function and method.
+      - Employ clear and descriptive parameter names.
+      - Specify specific non-vague types; avoid `object` or invalid types such as `any`. Use `typing.Any` where 
+          generality is required.
+      - Include any relevant constraints or modifiers.
+      - Ensure that default values in method signatures match the expected type to avoid type mismatches and 
+          improve type safety.
+      - If a function is intended to always return a specific type (e.g., `float` or `str`), provide appropriate 
+          fallback values in cases of exceptions or errors to maintain consistency in the return type. For 
+          instance, if `None` is not a valid return value, ensure that a default value (e.g., an empty string or 
+          0) is returned instead.
+      - When working with dynamically loaded values (e.g., from environment variables), account for their 
+      potential type variations and validate or convert them appropriately to prevent type-related issues.
+      - Avoid ambiguous return types that include optional values (`Optional[X]`) when the function is expected 
+          to always return a specific type. Instead, handle cases where the value might be `None` or invalid by either
+          raising an appropriate exception or substituting with a sensible default value.
+      - Ensure that error handling within methods does not result in incompatible or inconsistent return types. 
+          Always align return types with the function's type annotations to improve reliability and 
+          maintainability.
+
+      **Ensure Exception Handling:**
+      - Always ensure that `raise` statements are nested within structured exception blocks, such as 
+          `try...except`.
+      - Propagate original exceptions/errors to maintain traceback information; avoid re-raising exceptions as 
+          different types.
+      - **Avoid using print statements or logging within exception/error blocks.**
+      - **Never return `None`;** instead, raise appropriate exceptions or provide meaningful return values.
+      - Handle unexpected input types by:
+        - Validating input types at the function's start.
+        - Raising a `TypeError` for inappropriate argument types.
+        - Raising a `ValueError` for arguments with correct types but inappropriate values.
+        - Providing clear, informative error messages to facilitate debugging.
+
+      **Ensure Accurate Docstrings:**
+      - Clearly describe the function's purpose, parameters, return types, and exceptions raised.
+      - Follow standard conventions for clarity and consistency.
+                                
+      **Ensure adequate logging is implemented.**
+      
+      **Ensure a main method is implemented for standalone running capability:**
+      - The `main` method should initialize and orchestrate the execution of the program's functionality.
+      - Include appropriate logging within the `main` method to track execution and identify issues.
+      - Ensure the `main` method is invoked when the script is executed directly.
+      
+      ```python
+      {mitigated_code}
+      ```
+  - role: refactor_script_system_prompt
+    content: |
+      You are an AI programming assistant proficient in Python application development. Your expertise includes 
+      identifying and refactoring code to enhance security, readability, and efficiency, while adhering to best 
+      practices. Your guidance should be concise, actionable, and prioritize abstraction when reviewing and 
+      refactoring code.
+  - role: refactor_script_user_prompt
+    content: |
+      Please review and refactor the following Python code. Focus on:
+
+      1. Abstracting redundant logic to improve maintainability.
+      2. Implementing structured error handling to manage unexpected input types:
+         - Address exceptions specific to the method's functionality first.
+         - Handle exceptions from associated libraries next.
+         - Finally, address general exceptions, preserving their original types and messages.
+      3. Ensuring a main method is implemented for standalone running capability:
+         - The `main` method should initialize and orchestrate the execution of the program's functionality.
+         - Include appropriate logging within the `main` method to track execution and identify issues.
+         - Ensure the `main` method is invoked when the script is executed directly.
+
+      Avoid altering behavior or introducing additional variables. Use concise comments to explain critical modifications:
+      ```python
+      {fixed_code}
+      ```

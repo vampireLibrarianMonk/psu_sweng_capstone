@@ -280,9 +280,10 @@ def parse_python_script(file_path):
               - 'main_script' maps to a string containing the code within the `if __name__ == '__main__':` block.
     """
     parsed_script = {
+        'import_statements': '',
         'global_variables': '',
-        'methods': {},
-        'main_script': ''
+        'main_script': '',
+        'methods': {}
     }
 
     with open(file_path, 'r') as file:
@@ -326,7 +327,7 @@ def parse_python_script(file_path):
     used_global_vars = set()
     used_imports = set()
 
-    # Step 3: Include relevant globals and imports in function code
+    # Step 3: Include relevant globals and imports in their respective methods
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):
             method_name = node.name
@@ -353,7 +354,6 @@ def parse_python_script(file_path):
                             method_code = imp_code + '\n' + method_code
                             used_imports.add(imp_code)
                 elif isinstance(imp_node, ast.ImportFrom):
-                    module = imp_node.module
                     for alias in imp_node.names:
                         if is_name_used_in_node(alias.name, node):
                             method_code = imp_code + '\n' + method_code
@@ -369,10 +369,11 @@ def parse_python_script(file_path):
             parsed_script['main_script'] = main_script_code
 
     # Step 4: Collect unused global variables and imports
-    unused_globals = [code for name, code in global_vars.items() if name not in used_global_vars]
-    unused_imports = [code for _, code in import_statements if code not in used_imports]
+    global_variables = [code for name, code in global_vars.items() if name not in used_global_vars]
+    imports_statements = [code for _, code in import_statements if code not in used_imports]
 
-    parsed_script['global_variables'] = '\n'.join(unused_imports + unused_globals).strip()
+    parsed_script['global_variables'] = '\n'.join(global_variables).strip()
+    parsed_script['import_statements'] = '\n'.join(imports_statements).strip()
 
     return parsed_script
 
@@ -597,6 +598,9 @@ def get_bandit_issues(input_bandit_file):
         result["test_id"]: (result["line_number"], result["line_range"], result["issue_text"])
         for result in data["results"]
     }
+
+    if not test_id_mapping_with_range:
+        return "No issues found."
 
     # Construct Bandit issues for user prompt
     bandit_issues = "\n".join(
@@ -1249,6 +1253,8 @@ def run_code_quality_scan(llm, input_file_path, logger):
 
 
 def run_mitigation_loop(
+        mitigation_system_prompt,
+        mitigation_user_prompt,
         iteration_allowance,
         base_name,
         llm,
@@ -1309,10 +1315,6 @@ def run_mitigation_loop(
     # Do not want to scan the file that is going to potentially change from other scans
     mypy_issues = "No issues found."
 
-    # Initialize vulture issues with no issues string
-    # Do not want to scan the file that is going to potentially change from other scans
-    vulture_issues = "No unused code found."
-
     # Dependencies Scans
     # Safety
     # Focuses on identifying known security vulnerabilities in your project's dependencies by scanning requirements.txt
@@ -1370,10 +1372,10 @@ def run_mitigation_loop(
         else:
             substitution_code_instruction = ""
 
-        # Construct the complete prompt
+        # Construct the mitigation user prompt
         bandit_issues_section = (f"Bandit has identified the following issues"
                                  f" in the provided Python code:\n{bandit_issues}\n\n") \
-            if bandit_issues != "" else ""
+            if bandit_issues != "No issues found." else ""
 
         dodgy_issues_section = (f"Dodgy has identified the following issues"
                                 f" in the provided Python code:\n{dodgy_issues}\n\n") \
@@ -1387,121 +1389,45 @@ def run_mitigation_loop(
                                f" in the provided Python code:\n{mypy_issues}\n\n") \
             if mypy_issues != "No issues found." else ""
 
-        vulture_issues_section = f"**Address the Following Unused Code Findings:**:\n{vulture_issues}\n\n" \
-            if vulture_issues != "No unused code found." else ""
+        if (
+                bandit_issues != "No issues found." and
+                dodgy_issues != "No issues found." and
+                semgrep_issues != "No issues found."
+        ):
 
-        # Define the system and user prompts
-        system_prompt = (
-            "You are an AI programming assistant specializing in secure coding practices."
-        )
-
-        user_prompt = (
-            f"""
+            security_issues_section = (
+            f"""      
             **Adhere to Best Security Practices:**
             {bandit_issues_section}
             {dodgy_issues_section}
             {semgrep_issues_section}
-            
-            **Adhere to These Linter Findings:**
-            {mypy_issues_section}      
+            """)
+        else:
+            security_issues_section = ""
 
-            **Address Unused Code:**
-            - Refactor or remove unused functions and variables flagged by static analysis tools like Vulture to improve
-                code maintainability and clarity:
-            - Ensure the identified unused code is either integrated into the logic where appropriate or removed 
-                entirely while preserving the script's intended functionality and maintaining code quality.
-            - For functions or variables removed, ensure any related references, comments, or documentation are also 
-                updated to maintain consistency.
+        if mypy_issues != "No issues found.":
+            linter_issues_section = (
+                f"""
+                **Adhere to These Linter Findings:**'
+                {mypy_issues_section}
+                """
+            )
+        else:
+            linter_issues_section = ""
 
-            {vulture_issues_section}  
-            
-            **Code Simplification:**
-            - Regularly analyze the codebase for unused functions, variables, or imports, and remove them to keep the 
-                code clean and efficient.
-            - Combine related error-handling logic into fewer, well-documented functions to avoid redundancy and improve
-                code reusability.
-            - Maintain a balance between readability and efficiency by ensuring the code remains concise, modular, and 
-                well-structured.
+        issues_section = f"{security_issues_section}\n\n{linter_issues_section}\n\n".strip()
 
-            {substitution_code_instruction}
-
-            **Ensure the code does not exceed {word_count} words or {line_count} lines.**
-
-            **Only perform a one for one replacement for the method provided, do not write additional methods."**
-                  
-            **Include only the code with appropriate docstrings and inline comments.**
-
-            **Never hard code credentials, keys, or sensitive data.** Retrieve them securely from environment variables,
-            configuration files, or external services. Avoid embedding sensitive data directly in code. When automating 
-            with tools like SSH, pass sensitive data through environment variables (e.g., using 'sshpass --env' for 
-            passwords) to prevent exposure in command-line arguments. Ensure temporary sensitive data is cleared from 
-            memory or the environment immediately after use. Avoid using variable names containing 'password' or similar
-             terms for storing sensitive data.
-             
-            **Ensure that all environment variables are checked after loading to guarantee they are not None and match 
-                the expected data type.** 
-            - Use explicit type conversion (e.g., `int()`, `float()`, `str()`) to ensure the values conform to the 
-                required type and handle potential conversion errors gracefully. 
-            - When type conversion is performed, validate the converted value to ensure it meets functional 
-                requirements (e.g., range checks for numeric values). 
-            - If an environment variable is required but not set, log an appropriate error and terminate execution or 
-                provide a fallback value where applicable. 
-            
-            **Define Method Signatures:**
-            - Use explicit type annotations for all parameters and return values; ensure that both parameter types and 
-                return types are specified for every function and method.
-            - Employ clear and descriptive parameter names.
-            - Specify specific non-vague types; avoid `object` or invalid types such as `any`. Use `typing.Any` where 
-                generality is required.
-            - Include any relevant constraints or modifiers.
-            - Ensure that default values in method signatures match the expected type to avoid type mismatches and 
-                improve type safety.
-            - If a function is intended to always return a specific type (e.g., `float` or `str`), provide appropriate 
-                fallback values in cases of exceptions or errors to maintain consistency in the return type. For 
-                instance, if `None` is not a valid return value, ensure that a default value (e.g., an empty string or 
-                0) is returned instead.
-            - When working with dynamically loaded values (e.g., from environment variables), account for their 
-            potential type variations and validate or convert them appropriately to prevent type-related issues.
-            - Avoid ambiguous return types that include optional values (`Optional[X]`) when the function is expected 
-                to always return a specific type. Instead, handle cases where the value might be `None` or invalid by either
-                raising an appropriate exception or substituting with a sensible default value.
-            - Ensure that error handling within methods does not result in incompatible or inconsistent return types. 
-                Always align return types with the function's type annotations to improve reliability and 
-                maintainability.
-
-            **Ensure Exception Handling:**
-            - Always ensure that `raise` statements are nested within structured exception blocks, such as 
-                `try...except`.
-            - Propagate original exceptions/errors to maintain traceback information; avoid re-raising exceptions as 
-                different types.
-            - **Avoid using print statements or logging within exception/error blocks.**
-            - **Never return `None`;** instead, raise appropriate exceptions or provide meaningful return values.
-            - Handle unexpected input types by:
-              - Validating input types at the function's start.
-              - Raising a `TypeError` for inappropriate argument types.
-              - Raising a `ValueError` for arguments with correct types but inappropriate values.
-              - Providing clear, informative error messages to facilitate debugging.
-
-            **Ensure Accurate Docstrings:**
-            - Clearly describe the function's purpose, parameters, return types, and exceptions raised.
-            - Follow standard conventions for clarity and consistency.
-                                  
-            **Ensure adequate logging is implemented.**
-            
-            **Ensure a main method is implemented for standalone running capability:**
-            - The `main` method should initialize and orchestrate the execution of the program's functionality.
-            - Include appropriate logging within the `main` method to track execution and identify issues.
-            - Ensure the `main` method is invoked when the script is executed directly.
-            
-            ```python
-            {mitigated_code}
-            ```
-            """
-        )
+        mitigation_user_prompt = (f"{issues_section}\n\n" +
+                                      mitigation_user_prompt.format(
+                                        substitution_code_instruction = substitution_code_instruction,
+                                        word_count = word_count,
+                                        line_count = line_count,
+                                        mitigated_code = mitigated_code
+                                    )).strip()
 
         messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
+            {"role": "system", "content": mitigation_system_prompt},
+            {"role": "user", "content": mitigation_user_prompt}
         ]
 
         # Adjust temperature to control randomness; increase to make output more diverse
@@ -1540,21 +1466,22 @@ def run_mitigation_loop(
 
         # Perform vulnerability/linter scans on mitigated file
         # Perform vulnerability scans again
-        (bandit_issues, dodgy_issues, semgrep_issues, mypy_issues, vulture_issues) = perform_scans(
+        (bandit_issues, dodgy_issues, semgrep_issues, mypy_issues) = perform_scans(
             mitigated_file_path,
             letter_conversion,
             extracted_libraries,
             logger
         )
 
-        vulnerability_gate = (bandit_issues == '' and
+        passed_scans = (bandit_issues == 'No issues found.' and
                               dodgy_issues == 'No issues found.' and
                               semgrep_issues == 'No issues found.' and
                               mypy_issues == 'No issues found.')
 
-        if vulnerability_gate:
-            return code_block
+        if not passed_scans:
+            logger.error(f"After {iteration} iterations issues still persist.")
 
+        return code_block
 
 def run_method_unit_test_creation_loop(
         correction_limit,
@@ -1770,7 +1697,7 @@ def perform_scans(file_path, associated_letter_conversion, libraries, logger):
     bandit_scan_json_path = analyze_file_with_bandit(file_path, associated_letter_conversion, logger)
     bandit_issues = get_bandit_issues(bandit_scan_json_path)
 
-    if bandit_issues == '':
+    if bandit_issues == 'No issues found.':
         logger.info("No issues encountered after bandit scan.")
     else:
         logger.info(f"Issues found in bandit scan: {bandit_scan_json_path}")
@@ -1803,15 +1730,15 @@ def perform_scans(file_path, associated_letter_conversion, libraries, logger):
         logger.info(f"Issues found in mypy scan: {mypy_scan_json_path}")
 
     # vulture
-    vulture_scan_json_path = analyze_file_with_vulture(file_path, associated_letter_conversion, logger)
-    vulture_issues = get_vulture_issues(vulture_scan_json_path)
+    # vulture_scan_json_path = analyze_file_with_vulture(file_path, associated_letter_conversion, logger)
+    # vulture_issues = get_vulture_issues(vulture_scan_json_path)
+    #
+    # if vulture_issues == 'No unused code found.':
+    #     logger.info("No issues encountered after vulture scan.")
+    # else:
+    #     logger.info(f"Issues found in vulture scan: {vulture_scan_json_path}")
 
-    if vulture_issues == 'No unused code found.':
-        logger.info("No issues encountered after vulture scan.")
-    else:
-        logger.info(f"Issues found in vulture scan: {vulture_scan_json_path}")
-
-    return bandit_issues, dodgy_issues, semgrep_issues, mypy_issues, vulture_issues
+    return bandit_issues, dodgy_issues, semgrep_issues, mypy_issues
 
 
 def save_code_to_file(code, path, logger):
