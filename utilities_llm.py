@@ -1292,41 +1292,43 @@ def run_mitigation_loop(
     # Bandit is a static analysis tool designed to deeply inspect Python code for security issues.
     # It focuses on detecting vulnerabilities at the code level, such as the use of unsafe functions
     # (e.g., eval, exec), insecure cryptographic practices and code injection risks.
-    bandit_scan_json_path = analyze_file_with_bandit(mitigated_file_path, letter_conversion, logger)
-    bandit_issues = get_bandit_issues(bandit_scan_json_path)
 
     # Dodgy is a lightweight security tool that complements Bandit by focusing on file-level issues.
     # It scans for hardcoded secrets (e.g., API keys, passwords), suspicious filenames (e.g., *.pem, id_rsa),
     # and insecure file paths (e.g., /tmp directories).
-    dodgy_scan_json_path = analyze_file_with_dodgy(mitigated_file_path, letter_conversion, logger)
-    dodgy_issues = get_dodgy_issues(dodgy_scan_json_path)
 
     # Semgrep
-    # Get libraries so the rulesets below (django and flask) can use them if they exist
-    extracted_libraries = extract_libraries(original_code)
-
     # A lightweight static analysis tool that scans code for security vulnerabilities and enforces coding standards.
     # It offers customizable rules and supports taint analysis to track untrusted data through your codebase.
-    semgrep_scan_json_path = analyze_file_with_semgrep(mitigated_file_path, letter_conversion, extracted_libraries,
-                                                       logger)
-    semgrep_issues = get_semgrep_issues(semgrep_scan_json_path)
 
-    # Initialize mypy issues with no issues string
-    # Do not want to scan the file that is going to potentially change from other scans
-    mypy_issues = "No issues found."
+    # Mypy
+    # A static type checker for Python that helps catch type-related errors before runtime by verifying the
+    # consistency of type hints in your code. It integrates seamlessly with Python, allowing developers to incrementally
+    # add type annotations and improve code reliability and maintainability.
 
-    # Dependencies Scans
+    # Dependencies Scans (TODO)
     # Safety
     # Focuses on identifying known security vulnerabilities in your project's dependencies by scanning requirements.txt
     # files. It cross-references your dependencies against a curated database of insecure packages to alert you to
     # potential risks.
 
-    # Data Flow
+    # Data Flow (TODO)
     # Python Taint (PyT)
     #  A static analysis tool designed to detect security vulnerabilities in Python code by tracking the flow of tainted
     #  (untrusted) data to sensitive functions. It helps identify potential injection points and data leaks.
 
-    logger.info(f"Running an iteration series of {iteration_allowance}.")
+    # Get libraries so the rulesets below (django and flask) can use them if they exist
+    extracted_libraries = extract_libraries(original_code)
+
+    # Perform vulnerability/linter scans on mitigated file
+    (bandit_issues, dodgy_issues, semgrep_issues, mypy_issues) = perform_scans(
+        mitigated_file_path,
+        letter_conversion,
+        extracted_libraries,
+        logger
+    )
+
+    logger.info(f"Entering mitigation series of {iteration_allowance}.")
     while iteration < iteration_allowance:
         logger.info(f"{'-' * 35} Running iteration {iteration} {'-' * 35}")
 
@@ -1417,17 +1419,18 @@ def run_mitigation_loop(
 
         issues_section = f"{security_issues_section}\n\n{linter_issues_section}\n\n".strip()
 
-        mitigation_user_prompt = (f"{issues_section}\n\n" +
+        inline_mitigation_user_prompt = (f"{issues_section}\n\n" +
                                       mitigation_user_prompt.format(
                                         substitution_code_instruction = substitution_code_instruction,
                                         word_count = word_count,
-                                        line_count = line_count,
-                                        mitigated_code = mitigated_code
+                                        line_count = line_count
                                     )).strip()
+        
+        inline_mitigation_user_prompt += "\n\n" + mitigated_code
 
         messages = [
             {"role": "system", "content": mitigation_system_prompt},
-            {"role": "user", "content": mitigation_user_prompt}
+            {"role": "user", "content": inline_mitigation_user_prompt}
         ]
 
         # Adjust temperature to control randomness; increase to make output more diverse
@@ -1456,32 +1459,37 @@ def run_mitigation_loop(
             iteration += 1
             mitigated_file_name = f"{mitigated_base_name}_iteration_{section}_{iteration}{ext}"
             mitigated_file_path = os.path.join(mitigated_folder, mitigated_file_name)
+
             logger.info(f"Applied autoimport to {mitigated_file_path}; imports have been updated.")
             fixed_code = autoimport.fix_code(code_block)
+
             logger.info(f"Saving code to file {mitigated_file_path}.")
             save_code_to_file(fixed_code, mitigated_file_path, logger)
+
+            # Perform vulnerability/linter scans on mitigated file
+            (bandit_issues, dodgy_issues, semgrep_issues, mypy_issues) = perform_scans(
+                mitigated_file_path,
+                letter_conversion,
+                extracted_libraries,
+                logger
+            )
+
+            passed_scans = (bandit_issues == 'No issues found.' and
+                            dodgy_issues == 'No issues found.' and
+                            semgrep_issues == 'No issues found.' and
+                            mypy_issues == 'No issues found.')
+
+            if passed_scans:
+                return fixed_code
+
+            elif not passed_scans and iteration >= iteration_allowance:
+                logger.error(f"After {iteration} iterations issues still persist.")
+
+                return code_block
         else:
             logger.warning("No adjusted code block found in the secure code suggestion. Stopping to diagnose issue.")
-            break
+            return code_block
 
-        # Perform vulnerability/linter scans on mitigated file
-        # Perform vulnerability scans again
-        (bandit_issues, dodgy_issues, semgrep_issues, mypy_issues) = perform_scans(
-            mitigated_file_path,
-            letter_conversion,
-            extracted_libraries,
-            logger
-        )
-
-        passed_scans = (bandit_issues == 'No issues found.' and
-                              dodgy_issues == 'No issues found.' and
-                              semgrep_issues == 'No issues found.' and
-                              mypy_issues == 'No issues found.')
-
-        if not passed_scans:
-            logger.error(f"After {iteration} iterations issues still persist.")
-
-        return code_block
 
 def run_method_unit_test_creation_loop(
         correction_limit,

@@ -35,14 +35,30 @@ prompts:
       memory or the environment immediately after use. Avoid using variable names containing 'password' or similar
       terms for storing sensitive data.
        
-      **Ensure that all environment variables are checked after loading to guarantee they are not None and match the 
-      expected data type.**
+      **Ensure that all environment variables are checked after loading to guarantee they are not `None` and match the 
+        expected data type.**
       - Use explicit type conversion (e.g., `int()`, `float()`, `str()`) to ensure the values conform to the required 
-      type and handle potential conversion errors gracefully. 
-      - When type conversion is performed, validate the converted value to ensure it meets functional requirements 
-      (e.g., range checks for numeric values). 
+        type and handle potential conversion errors gracefully.
+      - When type conversion is performed, validate the converted value to ensure it meets functional requirements (e.g.
+        , range checks for numeric values).
       - If an environment variable is required but not set, log an appropriate error and terminate execution or provide
-      a fallback value where applicable. 
+      a fallback value where applicable.
+      - Structured data formats such as JSON and YAML should be read from files rather than being passed directly 
+        through environment variables. This ensures maintainability, security, and consistency in configuration 
+        management. Paths to these configuration files may be set as environment variables, but the structured content 
+        itself must be loaded from disk at runtime.
+
+      **Validate and Sanitize Inputs:**  
+      - Ensure all inputs, including filenames and environment variables, are validated for existence, format, and type
+        before use.  
+      - Use `Path.resolve()` for filesystem paths to prevent directory traversal vulnerabilities.  
+      - Convert dynamically loaded values explicitly (`int()`, `str()`, etc.) to maintain consistency and prevent 
+        unexpected behavior.  
+      
+      **Enforce Type Safety:**  
+      - Apply strict type annotations to all functions, ensuring return types are consistent and non-optional unless 
+        explicitly required.  
+      - Replace ambiguous return types (`Optional[X]`) with defaults or explicit exceptions to prevent runtime errors.  
 
       **Define Method Signatures:**
       - Use explicit type annotations for all parameters and return values; ensure that both parameter types and 
@@ -89,10 +105,6 @@ prompts:
       - The `main` method should initialize and orchestrate the execution of the program's functionality.
       - Include appropriate logging within the `main` method to track execution and identify issues.
       - Ensure the `main` method is invoked when the script is executed directly.
-      
-      ```python
-      {mitigated_code}
-      ```
   - role: refactor_script_system_prompt
     content: |
       You are an AI programming assistant proficient in Python application development. Your expertise includes 
