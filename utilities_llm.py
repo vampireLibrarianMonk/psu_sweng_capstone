@@ -1391,33 +1391,29 @@ def run_mitigation_loop(
                                f" in the provided Python code:\n{mypy_issues}\n\n") \
             if mypy_issues != "No issues found." else ""
 
-        if (
-                bandit_issues != "No issues found." and
-                dodgy_issues != "No issues found." and
-                semgrep_issues != "No issues found."
-        ):
+        base_issues_section = "**Adhere to Best Security Practices:**"
 
-            security_issues_section = (
-            f"""      
-            **Adhere to Best Security Practices:**
-            {bandit_issues_section}
-            {dodgy_issues_section}
-            {semgrep_issues_section}
-            """)
-        else:
-            security_issues_section = ""
+        if bandit_issues != "No issues found.":
+            base_issues_section += "\n" + bandit_issues_section
+
+        if dodgy_issues != "No issues found.":
+            base_issues_section += "\n" + dodgy_issues_section
+
+        if semgrep_issues != "No issues found.":
+            base_issues_section += "\n" + semgrep_issues_section
+
+        if base_issues_section == "**Adhere to Best Security Practices:**":
+            base_issues_section = ""
+
+        base_linter_issues = "**Adhere to These Linter Findings:**"
 
         if mypy_issues != "No issues found.":
-            linter_issues_section = (
-                f"""
-                **Adhere to These Linter Findings:**'
-                {mypy_issues_section}
-                """
-            )
-        else:
-            linter_issues_section = ""
+            base_linter_issues += "\n" + mypy_issues_section
+            
+        if base_linter_issues == "**Adhere to These Linter Findings:**":
+            base_linter_issues = ""
 
-        issues_section = f"{security_issues_section}\n\n{linter_issues_section}\n\n".strip()
+        issues_section = f"{base_issues_section}\n\n{base_linter_issues}\n\n".strip()
 
         inline_mitigation_user_prompt = (f"{issues_section}\n\n" +
                                       mitigation_user_prompt.format(
@@ -1480,18 +1476,20 @@ def run_mitigation_loop(
                             mypy_issues == 'No issues found.')
 
             if passed_scans:
-                return fixed_code
+                return fixed_code, passed_scans
 
             elif not passed_scans and iteration >= iteration_allowance:
                 logger.error(f"After {iteration} iterations issues still persist.")
 
-                return code_block
+                return code_block, passed_scans
         else:
             logger.warning("No adjusted code block found in the secure code suggestion. Stopping to diagnose issue.")
-            return code_block
+            return code_block, False
 
 
 def run_method_unit_test_creation_loop(
+        unit_test_system_prompt,
+        unit_test_user_prompt,
         correction_limit,
         base_name,
         llm,
@@ -1499,42 +1497,17 @@ def run_method_unit_test_creation_loop(
         generated_unit_test_dir,
         file_base_name,
         letter_conversion,
-        original_code,
+        unit_test_original_code,
         method,
         import_string):
-    # Define the system and user prompts
-    system_prompt = (
-        "You are an AI assistant that generates Python unit tests using the pytest framework."
-    )
 
-    code_prompt = (
-        f"""
-        Generate a single functional unit test method for the specified code, strictly adhering to the following essential rules:
+    # Add the original unit test method code block to the
+    inline_unit_test_user_prompt = "\n\n" + unit_test_original_code
 
-        - **Single Test Case**: Generate only one test method focused on a specific functionality or scenario. Do not include multiple test methods or unrelated code.
-        - **Clarity and Purpose**: Use a clear and descriptive test case name that indicates the functionality being tested.
-        - **Isolation**: Ensure the test is atomic, independent of other tests, and avoids relying on shared state or resources.
-        - **Setup and Teardown**: Include setup and cleanup methods if necessary to initialize and dispose of resources (e.g., databases, mock objects).
-        - **Test Coverage**: Address a typical scenario or an edge case relevant to the functionality.
-        - **Assertions**: Use meaningful and precise assertions to validate the expected outcome against the actual result.
-        - **Mocking and Dependency Isolation**: Mock external dependencies (e.g., APIs, services) to isolate the code under test and avoid external failures.
-        - **Readability**: Add a descriptive docstring and inline comments to explain the purpose and behavior of the test.
-        - **Performance**: Ensure the test executes efficiently and avoids unnecessary delays.
-        - **Logging**: Include adequate logging to trace test execution and aid in debugging.
-
-        Based on the above rules, generate a single test method for the following code:
-
-        ```python
-        {original_code}
-        ```
-
-        **Include only the single test method, with appropriate docstrings and inline comments for clarity.**
-        """
-    )
-
+    # Form the message dictionary
     messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": code_prompt}
+        {"role": "system", "content": unit_test_system_prompt},
+        {"role": "user", "content": inline_unit_test_user_prompt}
     ]
 
     # Create chat completion llama object
@@ -1701,32 +1674,40 @@ def perform_scans(file_path, associated_letter_conversion, libraries, logger):
     # Perform scans again
     logger.info(f"Performing scans on {file_path}")
 
-    # Bandit
-    bandit_scan_json_path = analyze_file_with_bandit(file_path, associated_letter_conversion, logger)
-    bandit_issues = get_bandit_issues(bandit_scan_json_path)
+    # Do not perform security scans on unit tests as it flags its functionality
+    if "unit_test" not in file_path:
 
-    if bandit_issues == 'No issues found.':
-        logger.info("No issues encountered after bandit scan.")
+        # Bandit
+        bandit_scan_json_path = analyze_file_with_bandit(file_path, associated_letter_conversion, logger)
+        bandit_issues = get_bandit_issues(bandit_scan_json_path)
+
+        if bandit_issues == 'No issues found.':
+            logger.info("No issues encountered after bandit scan.")
+        else:
+            logger.info(f"Issues found in bandit scan: {bandit_scan_json_path}")
+
+        # Dodgy
+        dodgy_scan_json_path = analyze_file_with_dodgy(file_path, associated_letter_conversion, logger)
+        dodgy_issues = get_dodgy_issues(dodgy_scan_json_path)
+
+        if dodgy_issues == 'No issues found.':
+            logger.info("No issues encountered after dodgy scan.")
+        else:
+            logger.info(f"Issues found in dodgy scan: {dodgy_scan_json_path}")
+
+        # Semgrep
+        semgrep_scan_json_path = analyze_file_with_semgrep(file_path, associated_letter_conversion, libraries, logger)
+        semgrep_issues = get_semgrep_issues(semgrep_scan_json_path)
+
+        if semgrep_issues == 'No issues found.':
+            logger.info("No issues encountered after semgrep scan.")
+        else:
+            logger.info(f"Issues found in semgrep scan: {semgrep_scan_json_path}")
+
     else:
-        logger.info(f"Issues found in bandit scan: {bandit_scan_json_path}")
-
-    # Dodgy
-    dodgy_scan_json_path = analyze_file_with_dodgy(file_path, associated_letter_conversion, logger)
-    dodgy_issues = get_dodgy_issues(dodgy_scan_json_path)
-
-    if dodgy_issues == 'No issues found.':
-        logger.info("No issues encountered after dodgy scan.")
-    else:
-        logger.info(f"Issues found in dodgy scan: {dodgy_scan_json_path}")
-
-    # Semgrep
-    semgrep_scan_json_path = analyze_file_with_semgrep(file_path, associated_letter_conversion, libraries, logger)
-    semgrep_issues = get_semgrep_issues(semgrep_scan_json_path)
-
-    if semgrep_issues == 'No issues found.':
-        logger.info("No issues encountered after semgrep scan.")
-    else:
-        logger.info(f"Issues found in semgrep scan: {semgrep_scan_json_path}")
+        bandit_issues = []
+        dodgy_issues = []
+        semgrep_issues = []
 
     # Mypy
     mypy_scan_json_path = analyze_file_with_mypy(file_path, associated_letter_conversion, logger)

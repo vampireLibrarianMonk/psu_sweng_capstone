@@ -61,26 +61,33 @@ prompts:
       - Replace ambiguous return types (`Optional[X]`) with defaults or explicit exceptions to prevent runtime errors.  
 
       **Define Method Signatures:**
-      - Use explicit type annotations for all parameters and return values; ensure that both parameter types and 
-          return types are specified for every function and method.
+      - Use explicit type annotations for all parameters and return values; ensure that both parameter types and return 
+      types are specified for every function and method.
       - Employ clear and descriptive parameter names.
       - Specify specific non-vague types; avoid `object` or invalid types such as `any`. Use `typing.Any` where 
-          generality is required.
+      generality is required.
       - Include any relevant constraints or modifiers.
-      - Ensure that default values in method signatures match the expected type to avoid type mismatches and 
-          improve type safety.
+      - Ensure that default values in method signatures match the expected type to avoid type mismatches and improve 
+      type safety.
       - If a function is intended to always return a specific type (e.g., `float` or `str`), provide appropriate 
-          fallback values in cases of exceptions or errors to maintain consistency in the return type. For 
-          instance, if `None` is not a valid return value, ensure that a default value (e.g., an empty string or 
-          0) is returned instead.
-      - When working with dynamically loaded values (e.g., from environment variables), account for their 
-      potential type variations and validate or convert them appropriately to prevent type-related issues.
-      - Avoid ambiguous return types that include optional values (`Optional[X]`) when the function is expected 
-          to always return a specific type. Instead, handle cases where the value might be `None` or invalid by either
-          raising an appropriate exception or substituting with a sensible default value.
-      - Ensure that error handling within methods does not result in incompatible or inconsistent return types. 
-          Always align return types with the function's type annotations to improve reliability and 
-          maintainability.
+      fallback values in cases of exceptions or errors to maintain consistency in the return type. For instance, if 
+      `None` is not a valid return value, ensure that a default value (e.g., an empty string or 0) is returned instead.
+      - When working with dynamically loaded values (e.g., from environment variables), account for their potential 
+      type variations and validate or convert them appropriately to prevent type-related issues.
+      - Avoid ambiguous return types that include optional values (`Optional[X]`) when the function is expected to 
+      always return a specific type. Instead, handle cases where the value might be `None` or invalid by either 
+      raising an appropriate exception or substituting with a sensible default value.
+      - Ensure that error handling within methods does not result in incompatible or inconsistent return types. Always 
+      align return types with the function's type annotations to improve reliability and maintainability.
+      
+      **Additional Guidance for Input Validation:**
+      - For functions handling multiple types of input (e.g., strings, bytes), provide overloading of function 
+      signatures using `@overload` from `typing`. For example, create distinct overload signatures for each valid input 
+      type and ensure that the return type matches the input format.
+      - In cases where strict input typing is required, handle conversions and validations within the function body 
+      while enforcing correct types in the function signature.
+      - Address discrepancies in type expectations by documenting potential input types and ensuring the function either
+      handles multiple types internally or raises exceptions if an unsupported type is provided.
 
       **Ensure Exception Handling:**
       - Always ensure that `raise` statements are nested within structured exception blocks, such as 
@@ -129,3 +136,78 @@ prompts:
       ```python
       {fixed_code}
       ```
+  - role: unit_test_system_prompt
+    content: |
+      You are an AI assistant that generates Python unit tests using the pytest framework. Your task is to generate 
+      well-structured, single-method unit tests based on provided code snippets.
+  - role: unit_test_user_prompt
+    content: |
+      Generate a test suite using the pytest framework to structurally execute prescribed unit tests, ensuring the top 
+      three types of unit tests are included. Each function under test should have exactly **one test** for each of the 
+      following types, with no additional tests of the same type:
+      
+      ### **Types of Tests:**
+      1. **Positive Test:** Validate that the function performs as expected under normal conditions.
+      2. **Negative Test:** Test edge cases, invalid inputs, or scenarios where the function should raise an exception 
+      or fail gracefully.
+      3. **Boundary Test:** Check behavior at boundary conditions (e.g., minimum/maximum values, empty inputs, limits).
+      
+      ### **Test Creation Rules:**
+      1. **Test Name:** Clearly indicate the test type and purpose in the test method name (e.g., 
+      `test_function_positive`, `test_function_negative`).
+      2. **Unique Test Types:** Create only one of each test type (positive, negative, boundary) for each function. 
+      Avoid creating multiple tests for similar conditions unless they cover substantially different cases.
+      3. **Test Focus:** 
+         - The **positive test** should focus on the normal execution path.
+         - The **negative test** should handle critical invalid inputs or errors.
+         - The **boundary test** should cover edge values or special cases.
+      
+      4. **Setup and Cleanup:** Include necessary setup (e.g., temporary resources, mock data) and ensure proper cleanup
+      to avoid side effects between tests.
+      5. **Assertions:** Use meaningful assertions to verify expected outputs or behavior. 
+      6. **Test Efficiency:** Ensure tests are concise, avoiding redundant scenarios or operations.
+      
+      ### **General Test Rules:**
+      1. **Test Name:** Use clear, descriptive names for each test method to reflect the functionality being tested.
+      2. **Independence:** Ensure each test is isolated and does not depend on other tests or shared resources.
+      3. **Setup and Teardown:** Include setup/cleanup logic (e.g., mocking, resource initialization) as necessary to 
+      manage dependencies.
+      4. **Assertions:** Validate expected outcomes with meaningful assertions that reflect the behavior of the code 
+      under test.
+      5. **Mocking:** Use `unittest.mock` to isolate external dependencies (APIs, services) and focus on core logic.
+      6. **Readability:** Add descriptive docstrings and inline comments to explain each test's purpose and behavior.
+      7. **Efficiency:** Ensure tests run efficiently, minimizing redundant operations or unnecessary delays.
+      8. **Execution Structure:** Provide a `main` method that programmatically executes the test suite using pytest's 
+      test discovery mechanism.
+      9. **Do Not Define Method Under Test:** Assume the method to test will be prepended to the file and is already 
+      available.     
+     
+      ### **Lessons Learned for Temporary File Handling in Tests:**
+      1. **Opening Mode Matters:** When writing data to temporary files, use the appropriate file mode (`text` or 
+      `binary`) based on the data format. Writing string-based data (e.g., JSON, CSV, text) requires opening the file in
+      text mode (`mode='w'`), whereas binary data (e.g., images, serialized bytes) requires binary mode (`mode='wb'`). 
+      Mismatched modes can lead to `TypeError` or unexpected encoding/decoding issues.
+         
+      2. **Temporary Files:** Use Python's `tempfile.NamedTemporaryFile` to create temporary files during testing. 
+      Ensure the `delete` parameter is set to `False` if you need the file to persist beyond the scope of the `with` 
+      statement, and handle cleanup manually with `os.remove()`.
+      
+      3. **File Operations:** Ensure the file's path is correctly passed to the function being tested, and that the test
+      reflects expected behavior based on file access exceptions (e.g., handling `FileNotFoundError` or `ValueError`).
+      
+      4. **Error Message Matching:** Exception handling in tests must match the actual behavior of the method under 
+      test. If the method raises a specific error message, adjust the test assertions to validate against the actual 
+      message.
+      
+      5. **Logging Capture:** To verify logging output, define a custom log handler and add it to the logger. This 
+      allows capturing and asserting log messages without relying on external patches or mocks.
+      
+      ### **Temporary File Best Practices in Tests:**
+      1. **Setup:** Use `tempfile` to safely create temporary resources without hardcoding paths.
+      2. **Teardown:** Always clean up temporary files in a `finally` block to ensure no files are left behind after 
+      test execution.
+      3. **Data Isolation:** Each test should have its own temporary file to avoid interference with other tests.
+      
+      ### **Execution of Test Suite:**
+      The test suite should be executed using `pytest.main()` in the script's main entry point. This ensures automated 
+      discovery and execution of tests when the script is run directly.
