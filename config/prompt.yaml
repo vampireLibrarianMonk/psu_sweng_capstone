@@ -28,12 +28,12 @@ prompts:
                 
       **Include only the code with appropriate docstrings and inline comments.**
 
-      **Never hard code credentials, keys, or sensitive data.** Retrieve them securely from environment variables,
-      configuration files, or external services. Avoid embedding sensitive data directly in code. When automating 
-      with tools like SSH, pass sensitive data through environment variables (e.g., using 'sshpass --env' for 
-      passwords) to prevent exposure in command-line arguments. Ensure temporary sensitive data is cleared from 
-      memory or the environment immediately after use. Avoid using variable names containing 'password' or similar
-      terms for storing sensitive data.
+      **Never hard code credentials, keys, or sensitive data.** 
+      Retrieve them securely from environment variables, configuration files, or external services. Avoid embedding 
+      sensitive data directly in code. When automating with tools like SSH, pass sensitive data through environment 
+      variables (e.g., using 'sshpass --env' for passwords) to prevent exposure in command-line arguments. Ensure 
+      temporary sensitive data is cleared from memory or the environment immediately after use. Avoid using variable 
+      names containing 'password' or similar terms for storing sensitive data.
        
       **Ensure that all environment variables are checked after loading to guarantee they are not `None` and match the 
         expected data type.**
@@ -142,72 +142,98 @@ prompts:
       well-structured, single-method unit tests based on provided code snippets.
   - role: unit_test_user_prompt
     content: |
-      Generate a test suite using the pytest framework to structurally execute prescribed unit tests, ensuring the top 
-      three types of unit tests are included. Each function under test should have exactly **one test** for each of the 
-      following types, with no additional tests of the same type:
+      Generate exactly one test using pytest that validate each method below:
+      {method_code}
       
-      ### **Types of Tests:**
-      1. **Positive Test:** Validate that the function performs as expected under normal conditions.
-      2. **Negative Test:** Test edge cases, invalid inputs, or scenarios where the function should raise an exception 
-      or fail gracefully.
-      3. **Boundary Test:** Check behavior at boundary conditions (e.g., minimum/maximum values, empty inputs, limits).
+      ### Test Type:
+      {description}
       
-      ### **Test Creation Rules:**
-      1. **Test Name:** Clearly indicate the test type and purpose in the test method name (e.g., 
-      `test_function_positive`, `test_function_negative`).
-      2. **Unique Test Types:** Create only one of each test type (positive, negative, boundary) for each function. 
-      Avoid creating multiple tests for similar conditions unless they cover substantially different cases.
-      3. **Test Focus:** 
-         - The **positive test** should focus on the normal execution path.
-         - The **negative test** should handle critical invalid inputs or errors.
-         - The **boundary test** should cover edge values or special cases.
+      ## Tested Methods:
+      1. Don't create new methods assume input methods to test will be prepended into the file.
       
-      4. **Setup and Cleanup:** Include necessary setup (e.g., temporary resources, mock data) and ensure proper cleanup
-      to avoid side effects between tests.
-      5. **Assertions:** Use meaningful assertions to verify expected outputs or behavior. 
-      6. **Test Efficiency:** Ensure tests are concise, avoiding redundant scenarios or operations.
+      ### Test Naming & Structure:
+      1. **Test Names:** Clearly reflect test type and method purpose.
+      3. **Assertions:** Validate outcomes using relevant checks.
+      4. **Setup & Teardown:** Use setup and cleanup steps to handle dependencies and mock data.
+      5. **Isolation:** Ensure tests do not share state by managing resources independently.
       
-      ### **General Test Rules:**
-      1. **Test Name:** Use clear, descriptive names for each test method to reflect the functionality being tested.
-      2. **Independence:** Ensure each test is isolated and does not depend on other tests or shared resources.
-      3. **Setup and Teardown:** Include setup/cleanup logic (e.g., mocking, resource initialization) as necessary to 
-      manage dependencies.
-      4. **Assertions:** Validate expected outcomes with meaningful assertions that reflect the behavior of the code 
-      under test.
-      5. **Mocking:** Use `unittest.mock` to isolate external dependencies (APIs, services) and focus on core logic.
-      6. **Readability:** Add descriptive docstrings and inline comments to explain each test's purpose and behavior.
-      7. **Efficiency:** Ensure tests run efficiently, minimizing redundant operations or unnecessary delays.
-      8. **Execution Structure:** Provide a `main` method that programmatically executes the test suite using pytest's 
-      test discovery mechanism.
-      9. **Do Not Define Method Under Test:** Assume the method to test will be prepended to the file and is already 
-      available.     
+      ### Temporary File Handling:
+      1. **Temporary Files:** Use `tempfile.NamedTemporaryFile` or `tmp_path` (pytest fixture) for test-specific 
+      temporary files.
+         - When using `NamedTemporaryFile`, ensure the `delete=False` argument is set if you need to access the file 
+      outside of its context.
+         - Use context management (`with` statement) to handle file creation and automatic cleanup when possible.
+      
+      2. **File Modes:** Match the file mode to the data being written or read to prevent encoding errors.
+         - Use text mode (`'w'` or `'r'`) for JSON and other textual data.
+         - Use binary mode (`'wb'` or `'rb'`) for non-textual data, such as serialized objects or byte streams.
+      
+      3. **Data Writing and Reading:** 
+         - Write and read data using appropriate methods for the file mode (e.g., `write()` for text, `write(b'...')` 
+      for binary).
+         - Avoid mixing modes, such as writing bytes to a file opened in text mode.
+      
+      4. **Error Handling:** Validate method behavior under file-related exceptions, such as `FileNotFoundError` or 
+      `PermissionError`.
+         - Use mock objects to simulate file access errors in unit tests.
+      
+      5. **Log Capturing:** Implement custom log handlers or pytest's built-in `caplog` fixture to capture and assert 
+      log messages generated during file operations.
+      
+      ### Test Method Signatures:
+      1. **Relevant Parameters:** Include only necessary parameters in the test method signature. Avoid unused 
+      parameters such as pytest fixtures (e.g., `tmp_path`) if they are not utilized within the method body.
+      2. **Descriptive Naming:** Ensure test method names clearly describe the purpose and behavior being tested, 
+      helping to identify the test's intent at a glance.
+      3. **Consistency:** Maintain a consistent structure across test methods, using meaningful parameters that align 
+      with the test's setup, execution, and assertions.
+      4. **Fixture Usage:** If a pytest fixture is required, declare it in the method signature. However, if no 
+      fixture-specific operations are performed, remove it to prevent confusion and maintain cleaner code.
+
+      ### Type Safety, Input Validation & Method Signatures:
+      1. **Strict Type Annotations:** Apply explicit parameter and return type annotations to all methods to ensure 
+      clarity and prevent ambiguity.
+      2. **Validation:** 
+         - Validate input types at the beginning of each method.
+         - Convert inputs as necessary, raising `TypeError` or `ValueError` for unsupported or invalid values.
+         - Avoid ambiguous types (`Optional[X]`) unless necessary. Provide default values or raise exceptions instead.
+      3. **Consistent Returns:** Ensure methods consistently return a defined type.
+         - Avoid returning `None`. Raise exceptions for errors or provide meaningful defaults instead.
+         - Align method behavior with return type annotations to maintain type safety and prevent inconsistencies.
+      4. **Explicit Parameter and Return Types:** Define all parameters and return values explicitly to avoid ambiguity.
+         - Avoid using vague types like `object`. Use `typing.Any` only when absolutely necessary.
+         - Ensure that parameter default values match their type annotations.
+      5. **Dynamic Value Handling:** Validate or convert dynamically loaded or runtime-injected values.
+         - Use Python’s `@overload` decorator from the `typing` module to provide precise type hints for methods with 
+      multiple valid input types.
      
-      ### **Lessons Learned for Temporary File Handling in Tests:**
-      1. **Opening Mode Matters:** When writing data to temporary files, use the appropriate file mode (`text` or 
-      `binary`) based on the data format. Writing string-based data (e.g., JSON, CSV, text) requires opening the file in
-      text mode (`mode='w'`), whereas binary data (e.g., images, serialized bytes) requires binary mode (`mode='wb'`). 
-      Mismatched modes can lead to `TypeError` or unexpected encoding/decoding issues.
-         
-      2. **Temporary Files:** Use Python's `tempfile.NamedTemporaryFile` to create temporary files during testing. 
-      Ensure the `delete` parameter is set to `False` if you need the file to persist beyond the scope of the `with` 
-      statement, and handle cleanup manually with `os.remove()`.
+      ### Exception Handling:
+      1. **Structured Try-Except Blocks:** Use `try-except` to catch and handle exceptions while preserving the original
+      context.
+         - For expected errors, provide a clear, descriptive message and raise a new exception using the `from` clause 
+      to retain traceback information.
+         - Avoid suppressing unexpected exceptions unless necessary, and always log or re-raise them to aid in 
+      debugging.
       
-      3. **File Operations:** Ensure the file's path is correctly passed to the function being tested, and that the test
-      reflects expected behavior based on file access exceptions (e.g., handling `FileNotFoundError` or `ValueError`).
+      2. **Input Validation:** Validate inputs at the start of methods to catch and handle errors early.
+         - Raise appropriate exceptions such as `TypeError` or `ValueError` with clear, informative messages when inputs
+      are invalid.
+         - Ensure that exceptions clearly distinguish between different failure scenarios (e.g., invalid data vs. 
+      missing resources) to improve error handling in calling code.
       
-      4. **Error Message Matching:** Exception handling in tests must match the actual behavior of the method under 
-      test. If the method raises a specific error message, adjust the test assertions to validate against the actual 
-      message.
+      3. **Error Context Preservation:** 
+         - Use exception chaining (`raise ... from e`) to provide both the original and re-raised exception details.
+         - This allows for better debugging and error tracing by maintaining a full stack trace of the error's origin.
       
-      5. **Logging Capture:** To verify logging output, define a custom log handler and add it to the logger. This 
-      allows capturing and asserting log messages without relying on external patches or mocks.
+      4. **Consistent Exception Types:** Raise exceptions that accurately reflect the error's nature.
+         - Avoid raising generic exceptions like `Exception`; instead, use or define specific exception classes 
+      (`FileNotFoundError`, `ValueError`, etc.).
+         - This ensures that consumers of the method can handle specific exceptions without ambiguity.
       
-      ### **Temporary File Best Practices in Tests:**
-      1. **Setup:** Use `tempfile` to safely create temporary resources without hardcoding paths.
-      2. **Teardown:** Always clean up temporary files in a `finally` block to ensure no files are left behind after 
-      test execution.
-      3. **Data Isolation:** Each test should have its own temporary file to avoid interference with other tests.
+      ### Documentation & Logging:
+      1. **Docstrings:** Explain each method's purpose, parameters, return type, and exceptions.
+      2. **Logging:** Add meaningful logging for execution tracking and issue diagnosis.
       
-      ### **Execution of Test Suite:**
-      The test suite should be executed using `pytest.main()` in the script's main entry point. This ensures automated 
-      discovery and execution of tests when the script is run directly.
+      ### Execution:
+      1. **Main Method:** Use `pytest.main()` for automated test discovery and execution.
+      2. **Efficiency:** Keep tests concise, avoiding redundancy to ensure fast execution.

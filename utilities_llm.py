@@ -1705,9 +1705,9 @@ def perform_scans(file_path, associated_letter_conversion, libraries, logger):
             logger.info(f"Issues found in semgrep scan: {semgrep_scan_json_path}")
 
     else:
-        bandit_issues = []
-        dodgy_issues = []
-        semgrep_issues = []
+        bandit_issues = "No issues found."
+        dodgy_issues = "No issues found."
+        semgrep_issues = "No issues found."
 
     # Mypy
     mypy_scan_json_path = analyze_file_with_mypy(file_path, associated_letter_conversion, logger)
